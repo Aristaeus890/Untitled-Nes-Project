@@ -227,6 +227,7 @@ SpriteBuffer = $0200
 Loop:
     ;JSR InitSprites
     JSR ReadButtons
+    JSR IncSine
     JSR ProcessEntities
     JSR ChangeFacing
     ;JSR Animate
@@ -337,11 +338,12 @@ NeutralValues:
 
 ; Music Note Spawning todo!
 CheckA:
-    JSR SpawnNote    
+    
     LDA buttons
     AND #%10000000
  
     BEQ CheckB
+    JSR SpawnNote    
     LDX #$00
    
   
@@ -374,6 +376,11 @@ CheckUp:
     AND #$08
     BEQ CheckDown
 
+    LDA entities+Entity::ypos
+    CLC
+    SBC #$01
+    LDA entities+Entity::ypos
+
     DEC YOffset ; Y move
     LDA #$00
     STA facing
@@ -385,6 +392,11 @@ CheckDown:
  LDA buttons
     AND #%00000100
     BEQ CheckLeft
+
+    LDA entities+Entity::ypos
+    CLC
+    ADC #$01
+    LDA entities+Entity::ypos
 
     LDA #$01
     STA facing
@@ -398,6 +410,12 @@ CheckLeft:
     AND #%00000010
     BEQ CheckRight
     DEC XOffset
+
+    LDA entities+Entity::xpos
+    CLC
+    SBC #$01
+    LDA entities+Entity::xpos
+
 
     LDA #$02
     STA facing
@@ -414,6 +432,12 @@ CheckRight:
     BEQ EndButtons
     INC XOffset
 
+    LDA entities+Entity::xpos
+    CLC
+    ADC #$01
+    LDA entities+Entity::xpos
+
+
     LDA #$03
     STA facing
 
@@ -423,6 +447,10 @@ CheckRight:
   
 
 EndButtons:
+RTS
+
+IncSine:
+
 RTS
 
 SpawnNote:
@@ -466,10 +494,14 @@ ProcessEntities:
         JMP SkipEntity
     ProcessPlayer:
         LDA entities+Entity::ypos, X
-        SEC 
-        SBC #$01
+        CLC  
+        ADC #$00
         STA entities+Entity::ypos, X
-        BCS EntityComplete
+        LDA entities+Entity::xpos, X 
+        CLC
+        ADC #$00
+        STA entities+Entity::ypos, X
+        JMP EntityComplete
     ProcessNote:
         LDA entities+Entity::xpos, X 
         SEC 
@@ -478,11 +510,19 @@ ProcessEntities:
         LDA entities+Entity::ypos, X 
         SEC 
         SBC #$01
-        STA entities+Entity::ypos, X 
-        BCS EntityComplete
+        STA entities+Entity::ypos, X
+        LDA entities+Entity::xpos, X 
+        CMP #$FE
+        BNE EntityComplete
+        JMP ClearEntity
+    ClearEntity:
+        LDA #EntityType::NoEntity
+        STA entities+Entity::type, X
+        LDA #$FF 
+        STA entities+Entity::xpos, X
+        STA entities+Entity::ypos, X
 
 
-    BNE SkipEntity
 
     EntityComplete:
     SkipEntity:
