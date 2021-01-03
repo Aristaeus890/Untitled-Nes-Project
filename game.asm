@@ -225,11 +225,11 @@ SpriteBuffer = $0200
 ;This is the forever loop, it goes here whenever its taken out of the NMI intterupt loop. Here is *ideally* where non draw stuff will happen...
 ; It runs through the whole game loop, then waits for the screen to be drawn then loops back to the beginning.
 Loop:
-    ;JSR InitSprites
+    ;JSR ClearSpriteBuffer
     JSR ReadButtons
-    JSR IncSine
     JSR ProcessEntities
     JSR ChangeFacing
+    JSR IncFrameCount
     ;JSR Animate
     JSR OAMBuffer
     
@@ -280,6 +280,15 @@ RTS
 ;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+ClearSpriteBuffer:
+    LDX #$00
+    LDA #$00
+    ClearBufferLoop:
+        STA $0200, X
+        INX 
+        CPX #$FF
+        BNE ClearBufferLoop 
+    RTS
 
 
 
@@ -341,7 +350,7 @@ CheckA:
     
     LDA buttons
     AND #%10000000
- 
+    JSR SpawnNote    
     BEQ CheckB
     JSR SpawnNote    
     LDX #$00
@@ -449,15 +458,16 @@ CheckRight:
 EndButtons:
 RTS
 
-IncSine:
-
-RTS
 
 SpawnNote:
     LDX #$00
+    LDY framecount
+    CPY #$00 ; Check if frame count is 0
+    BNE EndNoteSpawn
 NoteLoop:
-    CPX #TOTALENTITIES
+    CPX #TOTALENTITIES ; Check whether we're at the end of allowed entities
     BEQ EndNoteSpawn
+    
     LDA entities+Entity::type, X 
     CMP #$00 ; NO TYPE
     BEQ AddNote
@@ -473,6 +483,7 @@ AddNote:
     ADC #$04
     STA entities+Entity::xpos, X
     LDA entities+Entity::ypos
+    ADC #$04
     STA entities+Entity::ypos, X
     LDA #$02 ; note type
     STA entities+Entity::type, X
@@ -482,6 +493,18 @@ AddNote:
 
 EndNoteSpawn:
     RTS
+
+IncFrameCount:
+    LDX framecount
+    INX
+    CPX #$3B
+    BNE EndFrameCount
+    LDA #$00
+    STA framecount
+    RTS
+    EndFrameCount:
+    STX framecount
+RTS
 
 ProcessEntities:
     LDX #$00
@@ -500,18 +523,14 @@ ProcessEntities:
         LDA entities+Entity::xpos, X 
         CLC
         ADC #$00
-        STA entities+Entity::ypos, X
+        STA entities+Entity::xpos, X
         JMP EntityComplete
     ProcessNote:
-        LDA entities+Entity::xpos, X 
-        SEC 
-        SBC #$01
-        STA entities+Entity::xpos, X
         LDA entities+Entity::ypos, X 
         SEC 
         SBC #$01
         STA entities+Entity::ypos, X
-        LDA entities+Entity::xpos, X 
+        LDA entities+Entity::ypos, X 
         CMP #$FE
         BNE EntityComplete
         JMP ClearEntity
@@ -525,6 +544,7 @@ ProcessEntities:
 
 
     EntityComplete:
+
     SkipEntity:
     TXA 
     CLC 
@@ -570,6 +590,8 @@ OAMBuffer:
  
     DrawSprites:
         LDA entities+Entity::type, X 
+        CMP #$00
+        BEQ NoEntityJmp
         CMP #$01
         BEQ DrawPlayerJmp
         CMP #$02
@@ -578,6 +600,8 @@ OAMBuffer:
 
 
     ;;;; This branch is to get aroud the limited range of BEQ 
+    NoEntityJmp:
+        JMP CheckEndSpriteDraw
     DrawPlayerJmp:
         JMP DrawPlayer
     DrawNoteJmp:
@@ -771,7 +795,7 @@ PaletteData:
   .byte $22,$27,$14,$1A,$22,$1A,$30,$27,$22,$16,$30,$27,$22,$0F,$36,$17  ;sprite palette data
 
 Sine:
-    .byte $01,$02,$03,$04,$05,$06,$07,$FF
+    .byte $01,$02,$03,$04,$05,$06,$07,$06,$05,$04,$03,$02,$FF
 
 ;Todo: Compression of worldata
 
