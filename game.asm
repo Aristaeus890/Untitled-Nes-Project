@@ -23,7 +23,7 @@
     xpos .byte
     ypos .byte
     type .byte
-   ; spriteno .byte 
+    spriteno .byte 
 .endstruct
 
 
@@ -108,27 +108,31 @@ CLEARMEM:
     BNE CLEARMEM    ; Keep incrementing so you clear out the whole thing
 
 ; Clear out all of the entities
-; init 
+; The player is treated as a special case and handled seperately here.
 INIT_ENTITIES:
-    LDA #$70
+    LDA #$70 
     STA entities+Entity::xpos
     LDA #$B3
     STA entities+Entity::ypos
-    LDA entities+Entity::type
+    LDA #$01
     STA entities+Entity::type
+    LDA #$10
+    STA entities+Entity::spriteno
 
-    LDX #$03
+    LDX #$04
     LDA #$FF
 
 CLEARENTITIES:
     STA entities+Entity::xpos, X
     STA entities+Entity::ypos, X
+    STA entities+Entity::spriteno, X 
     LDA #$00
     STA entities+Entity::type, X
     LDA #$FF 
     INX
     INX
     INX
+    INX 
     CPX #TOTALENTITIES
     BNE CLEARENTITIES
 
@@ -227,6 +231,7 @@ InitApu:
 
 
 ; map some memory baabbbby!
+; All sprite data is to be stored here and retrieved every frame
 SpriteBuffer = $0200
 LDA #$20
 STA nextnote
@@ -248,25 +253,24 @@ STA nextnote
 ;This is the forever loop, it goes here whenever its taken out of the NMI intterupt loop. Here is *ideally* where non draw stuff will happen...
 ; It runs through the whole game loop, then waits for the screen to be drawn then loops back to the beginning.
 Loop:
-    JSR PlaySound
-    JSR WaveFlip 
-    JSR NoteIndex
-    JSR ReadButtons
-    JSR ProcessEntities
-    JSR ChangeFacing
-    JSR IncFrameCount
+    JSR PlaySound   ; does nothing atm
+    JSR WaveFlip    ; This index simply flips between 1 and 0. Used for directional variance
+    JSR NoteIndex   ; This changes the note sprite that will spawn
+    JSR ReadButtons ; Duh
+    JSR ProcessEntities ; All entity behaviour is handled here
+    JSR ChangeFacing    ; Old and irrelevant
+    JSR IncFrameCount   ; Counts to 59 then resets to 0
     ;JSR Animate
-    JSR OAMBuffer
+    JSR OAMBuffer   ; Sprite data is written to the buffer here
     
-    
+; Once the game logic loop is done, we hover here and wait for a vblank
+; After a return from Vblank, we jump back to the logic loop    
 IsVBlankDone:
     LDA nmidone
     CMP #$01
     BNE IsVBlankDone
     LDA #$00
     STA nmidone
-    
-
     JMP Loop
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -276,15 +280,14 @@ IsVBlankDone:
 
 ; Main loop that exectutes when the NMI interrupts. Here is where we want to do our drawing. All drawing must be done before the beam resets
 MAINLOOP:
-    JSR ReadSprites
-    JSR Scroll
+    JSR ReadSprites ; Get the sprites from the sprite buffer and write them to the ppu  
+    JSR Scroll  ; Send the current scroll to the ppu
     INC nmidone
     RTI
 
 ; Loading into 4014 automatically takes what you give as a high byte and writes 256 bytes to the PPU (so 02 == 0200 all thr way to FF)
-; In a real nes this neads to be done every frame b/c dynamic ram degradation? 
+; In a real nes this neads to be done every frame b/c dynamic ram degradation, its technically possible to avoid in some emulators, but best just to do it. 
 ReadSprites:
-
     LDA #$00
     STA $2003
     LDA #$02 ; copy sprite data from $0200 => PPU memory for display.
@@ -306,7 +309,7 @@ RTS
 ;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-
+; Wipe the sprite buffer
 ;;; TODO: Make buffer wiping dynamic based on what's in there.
 ClearSpriteBuffer:
     LDX #$00
@@ -319,11 +322,11 @@ ClearSpriteBuffer:
     RTS
 
 PlaySound:  
-
 RTS 
 
+;This flips a byte back between 1/0
 WaveFlip:
-    LDA thirtyframe
+    LDA thirtyframe ; this can be changed. Currently useful with 15,30,60 frame
     CMP #$00
     BEQ Flip 
     JMP EndFlip
@@ -400,30 +403,25 @@ ReadButtons:
     ROR A           ; Shift the A byte into the carry flag
     ROL buttons     ; Shift the A byte from the carry flag to the first position of Buttons
 
-
+; Currently has no effect. May use later
 NeutralValues:
     LDA #$00
     STA moving
 
-; Music Note Spawning todo!
-CheckA:
-    
+CheckA:    
     LDA buttons
     AND #%10000000
-    JSR SpawnNote    
+    ;JSR SpawnNote    
     BEQ CheckB
     JSR SpawnNote    
     LDX #$00
    
-  
-
 CheckB:
     LDA buttons
     AND #%01000000
     BEQ CheckSelect
     LDX #$00
     
-
 CheckSelect:
  LDA buttons
     AND #%00100000
@@ -433,7 +431,6 @@ CheckSelect:
     INX
     STX ScrollX
     LDX #$00
-
 
 CheckStart:
     LDA buttons
@@ -451,11 +448,11 @@ CheckUp:
     LDA entities+Entity::ypos
 
     DEC YOffset ; Y move
-    LDA #$00
-    STA facing
+
+    LDA #$18
+    STA entities+Entity::spriteno
        
     JMP EndButtons
-
 
 CheckDown:
     LDA buttons
@@ -467,8 +464,8 @@ CheckDown:
     ADC #$01
     LDA entities+Entity::ypos
 
-    LDA #$01
-    STA facing
+    LDA #$10
+    STA entities+Entity::spriteno
 
     INC YOffset
 
@@ -486,8 +483,8 @@ CheckLeft:
     LDA entities+Entity::xpos
 
 
-    LDA #$02
-    STA facing
+    LDA #$00
+    STA entities+Entity::spriteno
     
 
     LDA #$01
@@ -507,14 +504,11 @@ CheckRight:
     LDA entities+Entity::xpos
 
 
-    LDA #$03
-    STA facing
-
-    LDA #$01
+    LDA #$00
+    STA entities+Entity::spriteno
 
     STA moving
   
-
 EndButtons:
 RTS
 
@@ -528,13 +522,13 @@ SpawnNote:
 NoteLoop:
     CPX #TOTALENTITIES ; Check whether we're at the end of allowed entities
     BEQ EndNoteSpawn
-    
+; Checkif the current index has nothing in it   
     LDA entities+Entity::type, X 
     CMP #$00 ; NO TYPE
     BEQ AddNote
     TXA 
     CLC 
-    ADC #.sizeof(Entity)
+    ADC #.sizeof(Entity) ; This adds to the X index so that we can keep looping through all entitiy memory
     TAX
     JMP NoteLoop
 
@@ -548,9 +542,9 @@ AddNote:
     STA entities+Entity::ypos, X
     LDA #$02 ; note type
     STA entities+Entity::type, X
+    LDA nextnote
+    STA entities+Entity::spriteno, X 
     JMP EndNoteSpawn 
-
-
 
 EndNoteSpawn:
     RTS
@@ -634,16 +628,13 @@ ProcessEntities:
         STA entities+Entity::xpos, X
         STA entities+Entity::ypos, X
 
-
-
     EntityComplete:
-
     SkipEntity:
     TXA 
     CLC 
     ADC #.sizeof(Entity)
     TAX 
-    CMP #$1E
+    CMP #$28   ; Max entities?
     BNE ProcessEntitiesLoop
 
     DoneProcessingEntities:
@@ -707,7 +698,7 @@ OAMBuffer:
         ADC  YOffset
         STA SpriteBuffer, Y 
         INY 
-        LDA #$10
+        LDA entities+Entity::spriteno
         STA SpriteBuffer, Y 
         INY 
         LDA #$00
@@ -727,7 +718,9 @@ OAMBuffer:
         ADC  YOffset 
         STA SpriteBuffer, Y 
         INY 
-        LDA #$11
+        LDA entities+Entity::spriteno
+        CLC 
+        ADC #$01
         STA SpriteBuffer, Y 
         INY 
         LDA #$00
@@ -748,7 +741,9 @@ OAMBuffer:
         ADC YOffset
         STA SpriteBuffer, Y 
         INY 
-        LDA #$12
+        LDA entities+Entity::spriteno
+        CLC
+        ADC #$02
         STA SpriteBuffer, Y 
         INY 
         LDA #$00
@@ -767,7 +762,9 @@ OAMBuffer:
         ADC YOffset
         STA SpriteBuffer, Y 
         INY 
-        LDA #$13
+        LDA entities+Entity::spriteno
+        CLC 
+        ADC #$03
         STA SpriteBuffer, Y 
         INY 
         LDA #$00
@@ -786,7 +783,7 @@ OAMBuffer:
         LDA entities+Entity::ypos, X 
         STA SpriteBuffer, Y 
         INY 
-        LDA #$20
+        LDA entities+Entity::spriteno, X
         STA SpriteBuffer, Y 
         INY 
         LDA #$03
