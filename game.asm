@@ -23,6 +23,7 @@
     xpos .byte
     ypos .byte
     type .byte
+   ; spriteno .byte 
 .endstruct
 
 
@@ -47,10 +48,16 @@
     facingframe: .res 1
     playeraddress: .res 2
     sineindex: .res 1
+   
 
     MAXENTITIES = 10
     entities: .res .sizeof(Entity) * MAXENTITIES
     TOTALENTITIES = .sizeof(Entity) * MAXENTITIES
+
+    waveflip: .res 1
+    nextnote: .res 1
+    thirtyframe: .res 1
+    fifteenframe: .res 1
 
 
 ;; This tells the nes what to do when it starts up
@@ -103,9 +110,9 @@ CLEARMEM:
 ; Clear out all of the entities
 ; init 
 INIT_ENTITIES:
-    LDA #$80
+    LDA #$70
     STA entities+Entity::xpos
-    LDA #$78
+    LDA #$B3
     STA entities+Entity::ypos
     LDA entities+Entity::type
     STA entities+Entity::type
@@ -203,10 +210,26 @@ SetAttributes:
     LDX #$00
     LDY #$00    
 
+InitApu:
+    LDY #$13
+    InitApuLoop:
+        LDA APURegs, Y 
+        STA $4000, Y 
+        DEY 
+        BPL InitApuLoop
+
+        LDA #$0F 
+        STA $4015
+        LDA #$40
+        STA $4017
+
+
+
 
 ; map some memory baabbbby!
 SpriteBuffer = $0200
-
+LDA #$20
+STA nextnote
 
 ; Enable interrupts
     CLI
@@ -225,7 +248,9 @@ SpriteBuffer = $0200
 ;This is the forever loop, it goes here whenever its taken out of the NMI intterupt loop. Here is *ideally* where non draw stuff will happen...
 ; It runs through the whole game loop, then waits for the screen to be drawn then loops back to the beginning.
 Loop:
-    ;JSR ClearSpriteBuffer
+    JSR PlaySound
+    JSR WaveFlip 
+    JSR NoteIndex
     JSR ReadButtons
     JSR ProcessEntities
     JSR ChangeFacing
@@ -259,6 +284,7 @@ MAINLOOP:
 ; Loading into 4014 automatically takes what you give as a high byte and writes 256 bytes to the PPU (so 02 == 0200 all thr way to FF)
 ; In a real nes this neads to be done every frame b/c dynamic ram degradation? 
 ReadSprites:
+
     LDA #$00
     STA $2003
     LDA #$02 ; copy sprite data from $0200 => PPU memory for display.
@@ -280,16 +306,50 @@ RTS
 ;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+
+;;; TODO: Make buffer wiping dynamic based on what's in there.
 ClearSpriteBuffer:
     LDX #$00
-    LDA #$00
+    LDA #$FF 
     ClearBufferLoop:
         STA $0200, X
         INX 
-        CPX #$FF
+        CPX #$A0
         BNE ClearBufferLoop 
     RTS
 
+PlaySound:  
+
+RTS 
+
+WaveFlip:
+    LDA thirtyframe
+    CMP #$00
+    BEQ Flip 
+    JMP EndFlip
+    Flip:
+    INC waveflip
+    LDA waveflip
+    CMP #$02
+    BEQ ResetFlip
+    JMP EndFlip
+    ResetFlip:
+    LDA #$00
+    STA waveflip
+    EndFlip:
+RTS
+
+NoteIndex:
+    INC nextnote
+    LDA nextnote
+    CMP #$24
+    BEQ ResetNextNote
+    JMP EndNoteIndex
+    ResetNextNote:
+    LDA #$20
+    STA nextnote
+    EndNoteIndex:
+RTS
 
 
 ;;;;;;;;;;;;;
@@ -376,12 +436,12 @@ CheckSelect:
 
 
 CheckStart:
- LDA buttons
+    LDA buttons
     AND #%00010000
     BEQ CheckUp
 
 CheckUp:
- LDA buttons
+    LDA buttons
     AND #$08
     BEQ CheckDown
 
@@ -398,7 +458,7 @@ CheckUp:
 
 
 CheckDown:
- LDA buttons
+    LDA buttons
     AND #%00000100
     BEQ CheckLeft
 
@@ -415,7 +475,7 @@ CheckDown:
     JMP EndButtons
 
 CheckLeft:
- LDA buttons
+    LDA buttons
     AND #%00000010
     BEQ CheckRight
     DEC XOffset
@@ -436,7 +496,7 @@ CheckLeft:
     JMP EndButtons 
 
 CheckRight:
- LDA buttons
+    LDA buttons
     AND #%00000001
     BEQ EndButtons
     INC XOffset
@@ -461,9 +521,10 @@ RTS
 
 SpawnNote:
     LDX #$00
-    LDY framecount
+    LDY thirtyframe
     CPY #$00 ; Check if frame count is 0
-    BNE EndNoteSpawn
+    BEQ NoteLoop
+    JMP EndNoteSpawn
 NoteLoop:
     CPX #TOTALENTITIES ; Check whether we're at the end of allowed entities
     BEQ EndNoteSpawn
@@ -480,10 +541,10 @@ NoteLoop:
 AddNote:
     LDA entities+Entity::xpos
     CLC 
-    ADC #$04
+    ADC #$01
     STA entities+Entity::xpos, X
     LDA entities+Entity::ypos
-    ADC #$04
+    SBC #$02
     STA entities+Entity::ypos, X
     LDA #$02 ; note type
     STA entities+Entity::type, X
@@ -495,15 +556,32 @@ EndNoteSpawn:
     RTS
 
 IncFrameCount:
-    LDX framecount
-    INX
-    CPX #$3B
-    BNE EndFrameCount
-    LDA #$00
-    STA framecount
-    RTS
+    SixtyFrame:
+        INC framecount
+        LDX framecount
+        INX
+        CPX #$3B
+        BNE ThirtyFrame
+        LDA #$00
+        STA framecount
+    ThirtyFrame:
+        INC thirtyframe
+        LDX thirtyframe
+        INX 
+        CPX #$1E
+        BNE FifteenFrame
+        LDA #$00
+        STA thirtyframe
+    FifteenFrame:
+        INC fifteenframe
+        LDX fifteenframe
+        INX 
+        CPX #$0E
+        BNE EndFrameCount
+        LDA #$00
+        STA fifteenframe
     EndFrameCount:
-    STX framecount
+
 RTS
 
 ProcessEntities:
@@ -526,6 +604,21 @@ ProcessEntities:
         STA entities+Entity::xpos, X
         JMP EntityComplete
     ProcessNote:
+        LDA waveflip
+        CMP #$00
+        BEQ NoteLeft
+        NoteRight:
+            LDA entities+Entity::xpos, X 
+            CLC 
+            ADC #$01
+            JMP EndNoteLeftRight
+        NoteLeft:
+            LDA entities+Entity::xpos, X 
+            SEC 
+            SBC #$01
+        EndNoteLeftRight:
+        STA entities+Entity::xpos, X 
+        NoteVertical:
         LDA entities+Entity::ypos, X 
         SEC 
         SBC #$01
@@ -567,7 +660,7 @@ RTS
 
 OAMBuffer:
 
-    ;INC XOffset
+    JSR ClearSpriteBuffer
 
     BlankOutMem:
         LDA #$01 ; PLAYER TYPE
@@ -614,10 +707,10 @@ OAMBuffer:
         ADC  YOffset
         STA SpriteBuffer, Y 
         INY 
-        LDA #$00
+        LDA #$10
         STA SpriteBuffer, Y 
         INY 
-        LDA #$02
+        LDA #$00
         STA SpriteBuffer, Y 
         INY
         LDA entities+Entity::xpos, X
@@ -634,10 +727,10 @@ OAMBuffer:
         ADC  YOffset 
         STA SpriteBuffer, Y 
         INY 
-        LDA #$01
+        LDA #$11
         STA SpriteBuffer, Y 
         INY 
-        LDA #$02
+        LDA #$00
         STA SpriteBuffer, Y 
         INY
         LDA entities+Entity::xpos, X
@@ -655,10 +748,10 @@ OAMBuffer:
         ADC YOffset
         STA SpriteBuffer, Y 
         INY 
-        LDA #$02
+        LDA #$12
         STA SpriteBuffer, Y 
         INY 
-        LDA #$02
+        LDA #$00
         STA SpriteBuffer, Y 
         INY
         LDA entities+Entity::xpos, X
@@ -674,10 +767,10 @@ OAMBuffer:
         ADC YOffset
         STA SpriteBuffer, Y 
         INY 
-        LDA #$03
+        LDA #$13
         STA SpriteBuffer, Y 
         INY 
-        LDA #$02
+        LDA #$00
         STA SpriteBuffer, Y 
         INY
         LDA entities+Entity::xpos, X
@@ -696,7 +789,7 @@ OAMBuffer:
         LDA #$20
         STA SpriteBuffer, Y 
         INY 
-        LDA #$02
+        LDA #$03
         STA SpriteBuffer, Y 
         INY
         LDA entities+Entity::xpos, X
@@ -796,6 +889,13 @@ PaletteData:
 
 Sine:
     .byte $01,$02,$03,$04,$05,$06,$07,$06,$05,$04,$03,$02,$FF
+
+APURegs:
+    .byte $30,$08,$00,$00
+    .byte $30,$08,$00,$00
+    .byte $80,$00,$00,$00
+    .byte $30,$00,$00,$00
+    .byte $00,$00,$00,$00        
 
 ;Todo: Compression of worldata
 
@@ -898,17 +998,6 @@ Byte1:
 
 
 
-NoteOne:
-    .byte $60, $20, $00, $60
-
-NoteTwo:
-    .byte $40, $21, $00, $30
-
-NoteThree:
-    .byte $60, $22, $00, $40
-
-NoteFour:
-    .byte $80, $23, $00, $70
 
 
 
