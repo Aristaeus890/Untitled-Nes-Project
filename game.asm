@@ -161,12 +161,7 @@ LoadPalettes:
     INX
     CPX #$20
     BNE LoadPalettes    
-
-InitSprite:
-    LDA #<ZeldaSprite
-    STA playeraddress
-    LDA #>ZeldaSprite
-    STA playeraddress+1 
+ 
     
 
 InitWorld:
@@ -204,6 +199,42 @@ LoadWorld:
 DoneLoadingWorld:
     LDX #$00
 
+
+InitWorld2:
+    LDA #< WorldData2 ; take the low byte
+    STA world ; store low byte in z page
+    LDA #> WorldData2 ; take the high byte
+    STA world+1 ; store high into the world address +1 i.e the second byte of the address
+
+; setup address in PPU for nametable data
+    BIT $2002
+    LDA #$28
+    STA $2006
+    LDA #$00
+    STA $2006
+
+    LDX #$00
+    LDY #$00
+
+
+LoadWorld2:
+    LDA (world), Y
+    STA $2007
+    INY
+    CPX #$03
+    BNE :+
+    CPY #$E0
+    BEQ DoneLoadingWorld2
+:
+    CPY #$00
+    BNE LoadWorld2
+    INX
+    INC world+1
+    JMP LoadWorld2
+
+DoneLoadingWorld2:
+    LDX #$00
+
 SetAttributes:
     LDA #$55
     STA $2007
@@ -215,17 +246,16 @@ SetAttributes:
     LDY #$00    
 
 InitApu:
-    LDY #$13
-    InitApuLoop:
-        LDA APURegs, Y 
-        STA $4000, Y 
-        DEY 
-        BPL InitApuLoop
-
-        LDA #$0F 
-        STA $4015
-        LDA #$40
-        STA $4017
+   LDY #$13
+  InitApuLoop:
+    LDA APURegs, Y 
+    STA $4000, Y 
+    DEY 
+    BPL InitApuLoop
+    LDA #$0F 
+    STA $4015
+    LDA #$40
+    STA $4017
 
 
 
@@ -258,9 +288,8 @@ Loop:
     JSR NoteIndex   ; This changes the note sprite that will spawn
     JSR ReadButtons ; Duh
     JSR ProcessEntities ; All entity behaviour is handled here
-    JSR ChangeFacing    ; Old and irrelevant
     JSR IncFrameCount   ; Counts to 59 then resets to 0
-    ;JSR Animate
+    JSR DoScroll    
     JSR OAMBuffer   ; Sprite data is written to the buffer here
     
 ; Once the game logic loop is done, we hover here and wait for a vblank
@@ -281,7 +310,7 @@ IsVBlankDone:
 ; Main loop that exectutes when the NMI interrupts. Here is where we want to do our drawing. All drawing must be done before the beam resets
 MAINLOOP:
     JSR ReadSprites ; Get the sprites from the sprite buffer and write them to the ppu  
-    JSR Scroll  ; Send the current scroll to the ppu
+    JSR ReadScroll  ; Send the current scroll to the ppu
     INC nmidone
     RTI
 
@@ -295,7 +324,7 @@ ReadSprites:
     LDX #$00
 RTS
 
-Scroll:
+ReadScroll:
     LDA ScrollX
     STA $2005
     LDA ScrollY
@@ -321,7 +350,15 @@ ClearSpriteBuffer:
         BNE ClearBufferLoop 
     RTS
 
-PlaySound:  
+PlaySound:
+    LDA #<279
+    STA $4002
+
+    LDA #<279
+    STA $4003
+
+    LDA #%10111111
+    STA $4000
 RTS 
 
 ;This flips a byte back between 1/0
@@ -368,7 +405,7 @@ ReadButtons:
     STA $4016
 
     ;TODO make this a loop by slotting a one back into the carry flag after the 8th loop
-    
+     
     ButtonLoop:
     ; Ping the address to get A
     LDA $4016
@@ -445,10 +482,7 @@ CheckUp:
     LDA entities+Entity::ypos
     CLC
     SBC #$01
-    LDA entities+Entity::ypos
-
-    DEC YOffset ; Y move
-
+    STA entities+Entity::ypos
     LDA #$18
     STA entities+Entity::spriteno
        
@@ -462,12 +496,10 @@ CheckDown:
     LDA entities+Entity::ypos
     CLC
     ADC #$01
-    LDA entities+Entity::ypos
+    STA entities+Entity::ypos
 
     LDA #$10
     STA entities+Entity::spriteno
-
-    INC YOffset
 
     JMP EndButtons
 
@@ -475,12 +507,11 @@ CheckLeft:
     LDA buttons
     AND #%00000010
     BEQ CheckRight
-    DEC XOffset
 
     LDA entities+Entity::xpos
     CLC
     SBC #$01
-    LDA entities+Entity::xpos
+    STA entities+Entity::xpos
 
 
     LDA #$00
@@ -493,15 +524,19 @@ CheckLeft:
     JMP EndButtons 
 
 CheckRight:
+    ;LDA entities+Entity::xpos
+    ;CLC
+    ;ADC #$01
+    ;STA entities+Entity::xpos
+
     LDA buttons
     AND #%00000001
     BEQ EndButtons
-    INC XOffset
 
     LDA entities+Entity::xpos
     CLC
     ADC #$01
-    LDA entities+Entity::xpos
+    STA entities+Entity::xpos
 
 
     LDA #$00
@@ -644,6 +679,19 @@ ProcessEntities:
     NOP
 RTS
 
+DoScroll: ; When the player moves towards the right scroll the screen with them
+    LDA entities+Entity::xpos
+    CLC  
+    CMP #$C8
+    BCS ScrollRight
+    JMP EndDoScroll
+    ScrollRight:
+        INC ScrollY
+    EndDoScroll:
+RTS  
+    
+
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Write to the OAM Buffer
@@ -671,7 +719,7 @@ OAMBuffer:
         
        
         
- 
+    ; This checks the entity type of the current entity then branches accordingly
     DrawSprites:
         LDA entities+Entity::type, X 
         CMP #$00
@@ -694,8 +742,6 @@ OAMBuffer:
 
     DrawPlayer:
         LDA entities+Entity::ypos, X 
-        CLC
-        ADC  YOffset
         STA SpriteBuffer, Y 
         INY 
         LDA entities+Entity::spriteno
@@ -705,17 +751,13 @@ OAMBuffer:
         STA SpriteBuffer, Y 
         INY
         LDA entities+Entity::xpos, X
-        CLC
-        ADC  XOffset
         STA SpriteBuffer, Y
         INY
         
 
         ;Sprite 2
 
-        LDA entities+Entity::ypos, X
-        CLC
-        ADC  YOffset 
+        LDA entities+Entity::ypos, X 
         STA SpriteBuffer, Y 
         INY 
         LDA entities+Entity::spriteno
@@ -729,7 +771,6 @@ OAMBuffer:
         LDA entities+Entity::xpos, X
         CLC 
         ADC #$08
-        ADC  XOffset
         STA SpriteBuffer, Y
         INY
          
@@ -738,7 +779,6 @@ OAMBuffer:
         LDA entities+Entity::ypos, X
         CLC 
         ADC #$08 
-        ADC YOffset
         STA SpriteBuffer, Y 
         INY 
         LDA entities+Entity::spriteno
@@ -750,7 +790,6 @@ OAMBuffer:
         STA SpriteBuffer, Y 
         INY
         LDA entities+Entity::xpos, X
-        ADC XOffset
         STA SpriteBuffer, Y
         INY
         
@@ -759,7 +798,6 @@ OAMBuffer:
         LDA entities+Entity::ypos, X
         CLC 
         ADC #$08 
-        ADC YOffset
         STA SpriteBuffer, Y 
         INY 
         LDA entities+Entity::spriteno
@@ -773,7 +811,6 @@ OAMBuffer:
         LDA entities+Entity::xpos, X
         CLC 
         ADC #$08
-        ADC XOffset
         STA SpriteBuffer, Y
         INY
 
@@ -809,71 +846,6 @@ OAMBuffer:
         RTS 
 
 ;;;;;;;;;;;;;;;;;;;;
-
-ChangeFacing:
-
-    LDA facing
-    CMP #$00
-    BEQ FaceUp
-    CMP #$01
-    BEQ FaceDown
-    CMP #$03
-    BEQ FaceRight
-    CMP #$02
-    BEQ FaceLeft
-    
-FaceUp:
-    LDA #$18
-    STA facingframe
-
-    LDA #<ZeldaSpriteUp
-    STA playeraddress
-    LDA #>ZeldaSpriteUp
-    STA playeraddress+1 
-
-    JMP EndFacing
-
-FaceDown:
-    LDA #$10
-    STA facingframe
-
-    LDA #<ZeldaSpriteDown
-    STA playeraddress
-    LDA #>ZeldaSpriteDown
-    STA playeraddress+1 
-   
-    JMP EndFacing
-
-FaceRight:
-    LDA #$00
-    STA facingframe
-
-    LDA #<ZeldaSprite
-    STA playeraddress
-    LDA #>ZeldaSprite
-    STA playeraddress+1 
-   
-    JMP EndFacing
-
-FaceLeft:
-    
-
-    LDA #<ZeldaSpriteLeft
-    STA playeraddress
-    LDA #>ZeldaSpriteLeft
-    STA playeraddress+1 
-
-    JMP EndFacing
-EndFacing:
-
-
-    RTS
-
-
-
-
-
-
 
 
 NMI:            ; this happens once a frame when the draw arm mabob is returning to the top of the screen
@@ -937,63 +909,45 @@ WorldData: ; Each row is 32
     .byte $29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29; Overscan blank line
  
 
-ZeldaSprite:
-  .byte $00, $00, $00, $08
-  .byte $00, $01, $00, $10
-  .byte $08, $02, $00, $08
-  .byte $08, $03, $00, $10
+WorldData2: ; Each row is 32
+    .byte $29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29 ; Overscan blank line
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
 
-ZeldaSpriteUp:
-  .byte $00, $18, $00, $08
-  .byte $00, $19, $00, $10
-  .byte $08, $1A, $00, $08
-  .byte $08, $1B, $00, $10
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $25,$25,$25,$25,$25,$25,$25,$25,$25,$25,$25,$25,$25,$25,$25,$25,$25,$25,$25,$25,$25,$25,$25,$25,$25,$25,$25,$25,$25,$25,$25,$25
 
-ZeldaSpriteDown:
-  .byte $00, $10, $00, $08
-  .byte $00, $11, $00, $10
-  .byte $08, $12, $00, $08
-  .byte $08, $13, $00, $10
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
 
-ZeldaSpriteLeft:                ; This is sprite 1 but flipped and rearanged
-  .byte $00, $00, %01000000, $10
-  .byte $00, $01, %01000000, $08
-  .byte $08, $02, %01000000, $10
-  .byte $08, $03, %01000000, $08
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
 
+    .byte $30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30,$30
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
 
-Byte1:
-        LDA (playeraddress), Y
-        CLC
-        ADC YOffset
-        STA SpriteBuffer, Y
-        INY
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
 
-    Byte2:
-        LDA (playeraddress), Y
-        CLC
-        ADC anioffset
-        STA SpriteBuffer, Y
-        INY
+    .byte $45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45,$45
+    .byte $47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47  
+    .byte $47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47  
+    .byte $47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47  
+    
 
-    Byte3:   
-        LDA (playeraddress), Y
-        STA SpriteBuffer, Y
-
-    AttributeDone:
-        INY
-
-    Byte4:
-        LDA (playeraddress), Y
-        CLC
-        ADC XOffset
-        STA SpriteBuffer, Y
-        INY
-
-    CPY #$10
-    BNE Byte1
-
-
+    .byte $47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47  
+    .byte $29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29; Overscan blank line
 
 
 
