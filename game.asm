@@ -27,7 +27,7 @@
 .endstruct
 
 
-
+;todo: entities currently cant be moved bc references to its abs loc in other places 
 .segment "ZEROPAGE" ; LSB 0 - FF
 ;; Reserve memory for some specific things we need not to be futzed with
     SpriteMem: .res 2
@@ -58,7 +58,9 @@
     nextnote: .res 1
     thirtyframe: .res 1
     fifteenframe: .res 1
-
+    ARelease: .res 1  ; used for press/releasing A
+    BRelease: .res 1  ; used for press/releasing B
+    ButtonFlag: .res 1
 
 ;; This tells the nes what to do when it starts up
 ;; We basically disable most things initially and initialise some others
@@ -445,20 +447,45 @@ NeutralValues:
     LDA #$00
     STA moving
 
-CheckA:    
-    LDA buttons
+CheckA:
+
+    LDA buttons 
     AND #%10000000
-    ;JSR SpawnNote    
-    BEQ CheckB
-    JSR SpawnNote    
-    LDX #$00
-   
+    BEQ CheckARelease
+    LDA ButtonFlag
+    ORA #$01
+    STA ButtonFlag
+    JMP CheckB
+
+    CheckARelease:
+        LDA ButtonFlag
+        AND #$01
+        BEQ CheckB
+        LDA ButtonFlag
+        EOR #$01 
+        STA ButtonFlag
+        JSR SpawnNote   
+
 CheckB:
-    LDA buttons
+
+    LDA buttons 
     AND #%01000000
-    BEQ CheckSelect
-    LDX #$00
-    
+    BEQ CheckBRelease
+    LDA ButtonFlag
+    ORA #$02
+    STA ButtonFlag
+    JMP CheckSelect
+
+    CheckBRelease:
+        LDA ButtonFlag
+        AND #$02
+        BEQ CheckB
+        LDA ButtonFlag
+        EOR #$02 
+        STA ButtonFlag
+        JSR SpawnNote
+
+
 CheckSelect:
  LDA buttons
     AND #%00100000
