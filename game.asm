@@ -479,7 +479,7 @@ CheckB:
     CheckBRelease:
         LDA ButtonFlag
         AND #$02
-        BEQ CheckB
+        BEQ CheckSelect
         LDA ButtonFlag
         EOR #$02 
         STA ButtonFlag
