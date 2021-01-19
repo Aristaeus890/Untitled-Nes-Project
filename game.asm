@@ -577,10 +577,6 @@ RTS
 
 SpawnNote:
     LDX #$00
-    LDY thirtyframe
-    CPY #$00 ; Check if frame count is 0
-    BEQ NoteLoop
-    JMP EndNoteSpawn
 NoteLoop:
     CPX #TOTALENTITIES ; Check whether we're at the end of allowed entities
     BEQ EndNoteSpawn
