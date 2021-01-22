@@ -449,7 +449,6 @@ ReadButtons:
 
 ;;;;;;;;;;;;;;;; Controls for when the gamemode is 0 and the player can walkaround
 ; two seperate controls improves visibility but takes morespace. Reconsider?
-WalkControls:
     LDA buttons
     AND #%10000000
     BEQ CheckARelease
@@ -505,16 +504,7 @@ CheckSelect:
         EOR #$03
         STA ButtonFlag
         ; do something here optionally
-            LDX GameMode
-            INX 
-            CPX #$02
-            BEQ SetModeWalk
-            STX GameMode
-            SetModeWalk:
-                LDA #$00
-                STA GameMode
-            
-            
+        INC GameMode    
 
 CheckStart:
     LDA buttons
@@ -522,16 +512,10 @@ CheckStart:
     BEQ CheckUp
 
 CheckUp:
-    LDA GameMode
-    CMP #$00
-    BEQ WalkUp
-    JMP SingUp
-
-    WalkUp:
         LDA buttons
         AND #%00001000
         BEQ CheckDown  
-    MPUp:
+        
         LDA entities+Entity::ypos
         CLC
         SBC #$01
@@ -539,25 +523,6 @@ CheckUp:
         LDA #$18
         STA entities+Entity::spriteno
         JMP EndButtons
-
-    SingUp: 
-        LDA buttons
-        AND #%00001000
-        BEQ CheckUpRelease
-        LDA ButtonFlag
-        ORA #$05
-        STA ButtonFlag
-        ; Do something here optionally
-        JMP CheckStart
-
-        CheckUpRelease:
-            LDA ButtonFlag
-            AND #$05
-            BEQ CheckStart
-            LDA ButtonFlag
-            EOR #$05
-            STA ButtonFlag
-            JSR SpawnNote
 
 CheckDown:
     LDA buttons
