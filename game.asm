@@ -505,12 +505,14 @@ CheckSelect:
         EOR #$03
         STA ButtonFlag
         ; do something here optionally
-            LDA GameMode
-            CMP #$01
+            LDX GameMode
+            INX 
+            CPX #$02
             BEQ SetModeWalk
-            INC GameMode
+            STX GameMode
             SetModeWalk:
-                DEC GameMode
+                LDA #$00
+                STA GameMode
             
             
 
