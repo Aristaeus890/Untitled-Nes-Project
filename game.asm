@@ -5,7 +5,7 @@
 .byte $1a
 .byte $02 ; 2 * 16KB PRG ROM
 .byte $01 ; 1 * 8KB CHR ROM
-.byte %00000000 ; mapper and mirroring
+.byte %00000001 ; mapper and mirroring
 .byte $0000
 .byte $00
 .byte $00
@@ -61,6 +61,7 @@
     ARelease: .res 1  ; used for press/releasing A
     BRelease: .res 1  ; used for press/releasing B
     ButtonFlag: .res 1
+    GameMode: .res 1 ; 0=walk, 1=sing etc  
 
 ;; This tells the nes what to do when it starts up
 ;; We basically disable most things initially and initialise some others
@@ -443,13 +444,13 @@ ReadButtons:
     ROL buttons     ; Shift the A byte from the carry flag to the first position of Buttons
 
 ; Currently has no effect. May use later
-NeutralValues:
-    LDA #$00
-    STA moving
 
-CheckA:
 
-    LDA buttons 
+
+;;;;;;;;;;;;;;;; Controls for when the gamemode is 0 and the player can walkaround
+; two seperate controls improves visibility but takes morespace. Reconsider?
+WalkControls:
+    LDA buttons
     AND #%10000000
     BEQ CheckARelease
     LDA ButtonFlag
@@ -487,14 +488,31 @@ CheckB:
 
 
 CheckSelect:
- LDA buttons
+    LDA buttons
     AND #%00100000
-    BEQ CheckStart
+    BEQ CheckSelectRelease
+    LDA ButtonFlag
+    ORA #$03
+    STA ButtonFlag
+    ; Do something here optionally
+    JMP CheckStart
 
-    LDX ScrollX
-    INX
-    STX ScrollX
-    LDX #$00
+    CheckSelectRelease:
+        LDA ButtonFlag
+        AND #$03
+        BEQ CheckStart
+        LDA ButtonFlag
+        EOR #$03
+        STA ButtonFlag
+        ; do something here optionally
+            LDA GameMode
+            CMP #$01
+            BEQ SetModeWalk
+            INC GameMode
+            SetModeWalk:
+                DEC GameMode
+            
+            
 
 CheckStart:
     LDA buttons
@@ -502,18 +520,42 @@ CheckStart:
     BEQ CheckUp
 
 CheckUp:
-    LDA buttons
-    AND #$08
-    BEQ CheckDown
+    LDA GameMode
+    CMP #$00
+    BEQ WalkUp
+    JMP SingUp
 
-    LDA entities+Entity::ypos
-    CLC
-    SBC #$01
-    STA entities+Entity::ypos
-    LDA #$18
-    STA entities+Entity::spriteno
-       
-    JMP EndButtons
+    WalkUp:
+        LDA buttons
+        AND #%00001000
+        BEQ CheckDown  
+    MPUp:
+        LDA entities+Entity::ypos
+        CLC
+        SBC #$01
+        STA entities+Entity::ypos
+        LDA #$18
+        STA entities+Entity::spriteno
+        JMP EndButtons
+
+    SingUp: 
+        LDA buttons
+        AND #%00001000
+        BEQ CheckUpRelease
+        LDA ButtonFlag
+        ORA #$05
+        STA ButtonFlag
+        ; Do something here optionally
+        JMP CheckStart
+
+        CheckUpRelease:
+            LDA ButtonFlag
+            AND #$05
+            BEQ CheckStart
+            LDA ButtonFlag
+            EOR #$05
+            STA ButtonFlag
+            JSR SpawnNote
 
 CheckDown:
     LDA buttons
@@ -535,6 +577,7 @@ CheckLeft:
     AND #%00000010
     BEQ CheckRight
 
+
     LDA entities+Entity::xpos
     CLC
     SBC #$01
@@ -543,18 +586,10 @@ CheckLeft:
 
     LDA #$00
     STA entities+Entity::spriteno
-    
-
-    LDA #$01
-    STA moving
 
     JMP EndButtons 
 
 CheckRight:
-    ;LDA entities+Entity::xpos
-    ;CLC
-    ;ADC #$01
-    ;STA entities+Entity::xpos
 
     LDA buttons
     AND #%00000001
@@ -569,10 +604,9 @@ CheckRight:
     LDA #$00
     STA entities+Entity::spriteno
 
-    STA moving
-  
 EndButtons:
-RTS
+    RTS 
+ 
 
 
 SpawnNote:
