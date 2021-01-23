@@ -58,8 +58,6 @@
     nextnote: .res 1
     thirtyframe: .res 1
     fifteenframe: .res 1
-    ARelease: .res 1  ; used for press/releasing A
-    BRelease: .res 1  ; used for press/releasing B
     ButtonFlag: .res 1
     GameMode: .res 1 ; 0=walk, 1=sing etc  
 
@@ -483,26 +481,27 @@ CheckB:
         LDA ButtonFlag
         EOR #$02 
         STA ButtonFlag
-        JSR SpawnNote
+        ChangeMode:
+            LDA GameMode
+            AND #$01
+            BEQ SetSing 
+            SetWalk:
+                LDA GameMode
+                EOR #$01
+                STA GameMode
+                JMP CheckSelect
+            SetSing:
+                LDA GameMode
+                ORA #$01
+                STA GameMode
+                JMP CheckSelect
+
 
 
 CheckSelect:
     LDA buttons
     AND #%00100000
-    BEQ CheckSelectRelease
-    LDA ButtonFlag
-    ORA #$03
-    STA ButtonFlag
-    JMP CheckStart
-
-    CheckSelectRelease:
-        LDA ButtonFlag
-        AND #$03
-        BEQ CheckStart
-        LDA ButtonFlag
-        EOR #$03
-        STA ButtonFlag
-        JSR SpawnNote    
+    BEQ CheckStart    
 
 CheckStart:
     LDA buttons
