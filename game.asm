@@ -487,24 +487,22 @@ CheckB:
 
 
 CheckSelect:
-   ; LDA buttons
-   ; AND #%00100000
-   ; BEQ CheckSelectRelease
-   ; LDA ButtonFlag
-   ; ORA #$03
-   ; STA ButtonFlag
-    ; Do something here optionally
-   ; JMP CheckStart
+    LDA buttons
+    AND #%00100000
+    BEQ CheckSelectRelease
+    LDA ButtonFlag
+    ORA #$03
+    STA ButtonFlag
+    JMP CheckStart
 
-   ; CheckSelectRelease:
-   ;     LDA ButtonFlag
-   ;     AND #$03
-   ;     BEQ CheckStart
-   ;     LDA ButtonFlag
-   ;     EOR #$03
-   ;     STA ButtonFlag
-   ;     ; do something here optionally
-   ;     INC GameMode    
+    CheckSelectRelease:
+        LDA ButtonFlag
+        AND #$03
+        BEQ CheckStart
+        LDA ButtonFlag
+        EOR #$03
+        STA ButtonFlag
+        JSR SpawnNote    
 
 CheckStart:
     LDA buttons
