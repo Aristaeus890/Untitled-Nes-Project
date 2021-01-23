@@ -487,24 +487,24 @@ CheckB:
 
 
 CheckSelect:
-    LDA buttons
-    AND #%00100000
-    BEQ CheckSelectRelease
-    LDA ButtonFlag
-    ORA #$03
-    STA ButtonFlag
+   ; LDA buttons
+   ; AND #%00100000
+   ; BEQ CheckSelectRelease
+   ; LDA ButtonFlag
+   ; ORA #$03
+   ; STA ButtonFlag
     ; Do something here optionally
-    JMP CheckStart
+   ; JMP CheckStart
 
-    CheckSelectRelease:
-        LDA ButtonFlag
-        AND #$03
-        BEQ CheckStart
-        LDA ButtonFlag
-        EOR #$03
-        STA ButtonFlag
-        ; do something here optionally
-        INC GameMode    
+   ; CheckSelectRelease:
+   ;     LDA ButtonFlag
+   ;     AND #$03
+   ;     BEQ CheckStart
+   ;     LDA ButtonFlag
+   ;     EOR #$03
+   ;     STA ButtonFlag
+   ;     ; do something here optionally
+   ;     INC GameMode    
 
 CheckStart:
     LDA buttons
@@ -515,7 +515,7 @@ CheckUp:
         LDA buttons
         AND #%00001000
         BEQ CheckDown  
-        
+
         LDA entities+Entity::ypos
         CLC
         SBC #$01
