@@ -594,6 +594,10 @@ CheckLeft:
     LDA #$00
     STA entities+Entity::spriteno
 
+    ; set facing to 1 if moving left
+    LDA #$01
+    STA facing
+
     JMP EndButtons 
 
 CheckRight:
@@ -609,16 +613,18 @@ CheckRight:
         JSR SpawnNote  
         JMP EndButtons
 
-        WalkRight:
+    WalkRight:
 
     LDA entities+Entity::xpos
     CLC
     ADC #$01
     STA entities+Entity::xpos
 
-
     LDA #$00
     STA entities+Entity::spriteno
+
+    LDA #$00 
+    STA facing
 
 EndButtons:
     RTS 
@@ -665,7 +671,7 @@ FireLoop:
 ; Check if the current index has nothing in it   
     LDA entities+Entity::type, X 
     CMP #$00 ; NO TYPE
-    BEQ AddNote
+    BEQ AddFire
     TXA 
     CLC 
     ADC #.sizeof(Entity) ; This adds to the X index so that we can keep looping through all entitiy memory
@@ -873,6 +879,10 @@ OAMBuffer:
     ;;;;   
 
     DrawPlayer:
+        ; Check facing 
+
+
+
         LDA entities+Entity::ypos, X 
         STA SpriteBuffer, Y 
         INY 
