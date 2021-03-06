@@ -18,6 +18,7 @@
     PlayerType = 1
     Note = 2
     Fireball = 3
+    PlayerTwoType = 4
 .endscope
 
 .struct Entity
@@ -51,7 +52,7 @@
     sineindex: .res 1
    
 
-    MAXENTITIES = 10
+    MAXENTITIES = 2
     entities: .res .sizeof(Entity) * MAXENTITIES
     TOTALENTITIES = .sizeof(Entity) * MAXENTITIES
 
@@ -61,6 +62,7 @@
     fifteenframe: .res 1
     ButtonFlag: .res 1
     GameMode: .res 1 ; 0=walk, 1=sing etc  
+    return: .res 1 
     CurrentTile: .res 1
 
 ;; This tells the nes what to do when it starts up
@@ -113,7 +115,7 @@ CLEARMEM:
 ; Clear out all of the entities
 ; The player is treated as a special case and handled seperately here.
 INIT_ENTITIES:
-    LDA #$70 
+    LDA #$05 
     STA entities+Entity::xpos
     LDA #$B3
     STA entities+Entity::ypos
@@ -128,9 +130,9 @@ INIT_ENTITIES:
     ;STA entities+Entity::xpos, X 
     ;LDA #$A3 
     ;STA entities+Entity::ypos, X
-    ;LDA #$03 
+    ;LDA #$04 
     ;STA entities+Entity::type, X  
-    ;LDA #$34 
+    ;LDA #$10 
     ;STA entities+Entity::spriteno
 
     LDX #$04 ; add/sub 4 for each entity you want loaded initially
@@ -259,17 +261,17 @@ SetAttributes:
     LDX #$00
     LDY #$00    
 
-InitApu:
-   LDY #$13
-  InitApuLoop:
-    LDA APURegs, Y 
-    STA $4000, Y 
-    DEY 
-    BPL InitApuLoop
-    LDA #$0F 
-    STA $4015
-    LDA #$40
-    STA $4017
+;InitApu:
+;   LDY #$13
+;  InitApuLoop:
+;    LDA APURegs, Y 
+;    STA $4000, Y 
+;    DEY 
+;    BPL InitApuLoop
+;    LDA #$0F 
+;    STA $4015
+;    LDA #$40
+;    STA $4017
 
 SetPlayerPos:
     LDA #$F0
@@ -318,9 +320,10 @@ STA nextnote
 ;This is the forever loop, it goes here whenever its taken out of the NMI intterupt loop. Here is *ideally* where non draw stuff will happen...
 ; It runs through the whole game loop, then waits for the screen to be drawn then loops back to the beginning.
 Loop:
-    JSR PlaySound   ; does nothing atm
+    ;JSR PlaySound   ; does nothing atm except play an annoying noise
     JSR WaveFlip    ; This index simply flips between 1 and 0. Used for directional variance
     JSR NoteIndex   ; This changes the note sprite that will spawn
+    ;JSR SpawnFire
     JSR ReadButtons ; Duh
     JSR ProcessEntities ; All entity behaviour is handled here
     JSR IncFrameCount   ; Counts to 59 then resets to 0
@@ -686,7 +689,9 @@ AddFire:
     LDA entities+Entity::ypos
     STA entities+Entity::ypos, X
     LDA #$03 ; fire type
-    STA entities+Entity::type, X 
+    STA entities+Entity::type, X
+    LDA #$26
+    STA entities+Entity::spriteno, X 
     JMP EndFireSpawn 
 
 EndFireSpawn:
@@ -731,16 +736,12 @@ ProcessEntities:
         BEQ ProcessNote
         CMP #$03
         BEQ ProcessFire
+        CMP #$04
+        BEQ ProcessPlayerTwo
         JMP SkipEntity
+
     ProcessPlayer:
-        LDA entities+Entity::ypos, X
-        CLC  
-        ADC #$00
-        STA entities+Entity::ypos, X
-        LDA entities+Entity::xpos, X 
-        CLC
-        ADC #$00
-        STA entities+Entity::xpos, X
+        ;JSR PlayerCollide
         JMP EntityComplete
     ProcessNote:
         LDA waveflip
@@ -770,10 +771,14 @@ ProcessEntities:
         LDA entities+Entity::xpos, X 
         CLC
         ADC #$01
+        JSR PlayerCollide
         STA entities+Entity::xpos, X
-        CMP #$FE
-        BNE EntityComplete
-        JMP ClearEntity        
+        CMP #$F0
+        JMP EntityComplete ;BCC change
+        JMP ClearEntity
+    ProcessPlayerTwo:
+        JMP EntityComplete
+
     ClearEntity:
         LDA #EntityType::NoEntity
         STA entities+Entity::type, X
@@ -799,6 +804,49 @@ ProcessEntities:
     NOP
     NOP
 RTS
+
+PlayerCollide:
+    LDA entities+Entity::xpos
+    CLC 
+    ADC #$0F 
+    CMP entities+Entity::xpos, X 
+    BCS:+
+    RTS
+    ;check 2 
+    : LDA entities+Entity::xpos, X 
+    CLC 
+    ADC #$08
+    CMP entities+Entity::xpos 
+    BCS:+
+    RTS
+    : LDA entities+Entity::ypos
+    CLC 
+    ADC #$0F 
+    CMP entities+Entity::ypos, X 
+    BCS:+
+    RTS
+    : LDA entities+Entity::ypos, X 
+    CLC 
+    ADC #$08 
+    CMP entities+Entity::ypos 
+    BCS:+
+    RTS
+    :
+    LDA #EntityType::NoEntity
+    STA entities+Entity::type
+    LDA #$FF 
+    STA entities+Entity::xpos
+    STA entities+Entity::ypos
+    
+    RTS 
+
+DestroyPlayer:
+    LDA #$00
+    STA entities+Entity::xpos
+    STA entities+Entity::ypos
+    STA entities+Entity::type 
+    STA entities+Entity::spriteno
+RTS 
 
 DoScroll: ; check if the player is at the edge of the scree   
 
@@ -836,8 +884,8 @@ OAMBuffer:
     JSR ClearSpriteBuffer
 
     BlankOutMem:
-        LDA #$01 ; PLAYER TYPE
-        STA $17
+        ;LDA #$01 ; PLAYER TYPE
+        ;STA $17
 
         ;LDA #$02
         ;STA $1A
@@ -864,6 +912,8 @@ OAMBuffer:
         BEQ DrawNoteJmp
         CMP #$03
         BEQ DrawFireJmp
+        CMP #$04
+        BEQ DrawPlayerTwoJmp
         JMP EndSpriteDraw
 
 
@@ -876,6 +926,8 @@ OAMBuffer:
         JMP DrawNote 
     DrawFireJmp:
         JMP DrawFire
+    DrawPlayerTwoJmp:
+        JMP DrawPlayerTwo
     ;;;;   
 
     DrawPlayer:
@@ -957,6 +1009,87 @@ OAMBuffer:
         INY
 
         JMP CheckEndSpriteDraw
+
+DrawPlayerTwo:
+        ; Check facing 
+
+
+
+        LDA entities+Entity::ypos, X 
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::spriteno
+        STA SpriteBuffer, Y 
+        INY 
+        LDA #$01
+        STA SpriteBuffer, Y 
+        INY
+        LDA entities+Entity::xpos, X
+        STA SpriteBuffer, Y
+        INY
+        
+
+        ;Sprite 2 p2
+
+        LDA entities+Entity::ypos, X 
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::spriteno
+        CLC 
+        ADC #$01
+        STA SpriteBuffer, Y 
+        INY 
+        LDA #$01
+        STA SpriteBuffer, Y 
+        INY
+        LDA entities+Entity::xpos, X
+        CLC 
+        ADC #$08
+        STA SpriteBuffer, Y
+        INY
+         
+
+        ;sprite 3 p2
+        LDA entities+Entity::ypos, X
+        CLC 
+        ADC #$08 
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::spriteno
+        CLC
+        ADC #$02
+        STA SpriteBuffer, Y 
+        INY 
+        LDA #$01
+        STA SpriteBuffer, Y 
+        INY
+        LDA entities+Entity::xpos, X
+        STA SpriteBuffer, Y
+        INY
+        
+
+        ;sprite 4 p2
+        LDA entities+Entity::ypos, X
+        CLC 
+        ADC #$08 
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::spriteno
+        CLC 
+        ADC #$03
+        STA SpriteBuffer, Y 
+        INY 
+        LDA #$01
+        STA SpriteBuffer, Y 
+        INY
+        LDA entities+Entity::xpos, X
+        CLC 
+        ADC #$08
+        STA SpriteBuffer, Y
+        INY
+
+        JMP CheckEndSpriteDraw
+
 
     DrawNote:
         LDA entities+Entity::ypos, X 
