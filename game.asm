@@ -5,8 +5,8 @@
 .byte $1a
 .byte $02 ; 2 * 16KB PRG ROM
 .byte $01 ; 1 * 8KB CHR ROM
-.byte %00000001 ; mapper and mirroring
-.byte $0000
+.byte %00000010 ; mapper and mirroring
+.byte $0000  
 .byte $00
 .byte $00
 .byte $00
@@ -17,6 +17,7 @@
     NoEntity = 0
     PlayerType = 1
     Note = 2
+    Fireball = 3
 .endscope
 
 .struct Entity
@@ -60,6 +61,7 @@
     fifteenframe: .res 1
     ButtonFlag: .res 1
     GameMode: .res 1 ; 0=walk, 1=sing etc  
+    CurrentTile: .res 1
 
 ;; This tells the nes what to do when it starts up
 ;; We basically disable most things initially and initialise some others
@@ -120,7 +122,18 @@ INIT_ENTITIES:
     LDA #$10
     STA entities+Entity::spriteno
 
-    LDX #$04
+    ; Temp object for testing
+    ;LDX #$04
+    ;LDA #$04
+    ;STA entities+Entity::xpos, X 
+    ;LDA #$A3 
+    ;STA entities+Entity::ypos, X
+    ;LDA #$03 
+    ;STA entities+Entity::type, X  
+    ;LDA #$34 
+    ;STA entities+Entity::spriteno
+
+    LDX #$04 ; add/sub 4 for each entity you want loaded initially
     LDA #$FF
 
 CLEARENTITIES:
@@ -258,6 +271,27 @@ InitApu:
     LDA #$40
     STA $4017
 
+SetPlayerPos:
+    LDA #$F0
+    STA entities+Entity::xpos
+
+SetMirroring:
+    LDA #$80
+    STA $8000
+    LDA $00
+    STA $8000
+
+
+    LDA #$0F
+    STA $8000
+    LSR
+    STA $8000
+    LSR 
+    STA $8000
+    LSR 
+    STA $8000
+    LSR 
+    STA $8000
 
 
 
@@ -290,7 +324,7 @@ Loop:
     JSR ReadButtons ; Duh
     JSR ProcessEntities ; All entity behaviour is handled here
     JSR IncFrameCount   ; Counts to 59 then resets to 0
-    JSR DoScroll    
+    ;JSR DoScroll    
     JSR OAMBuffer   ; Sprite data is written to the buffer here
     
 ; Once the game logic loop is done, we hover here and wait for a vblank
@@ -481,21 +515,7 @@ CheckB:
         LDA ButtonFlag
         EOR #$02 
         STA ButtonFlag
-        ChangeMode:
-            LDA GameMode
-            AND #$01
-            BEQ SetSing 
-            SetWalk:
-                LDA GameMode
-                EOR #$01
-                STA GameMode
-                JMP CheckSelect
-            SetSing:
-                LDA GameMode
-                ORA #$01
-                STA GameMode
-                JMP CheckSelect
-
+        JSR SpawnFire
 
 
 CheckSelect:
@@ -513,6 +533,14 @@ CheckUp:
         AND #%00001000
         BEQ CheckDown  
 
+        ;Check mode
+        LDA GameMode
+        AND #$01
+        BEQ WalkUp
+        JSR SpawnNote
+        JMP CheckDown
+
+        WalkUp:
         LDA entities+Entity::ypos
         CLC
         SBC #$01
@@ -526,6 +554,14 @@ CheckDown:
     AND #%00000100
     BEQ CheckLeft
 
+    ;Check mode
+        LDA GameMode
+        AND #$01
+        BEQ WalkDown
+        JSR SpawnNote
+        JMP CheckLeft
+
+    WalkDown:
     LDA entities+Entity::ypos
     CLC
     ADC #$01
@@ -541,7 +577,14 @@ CheckLeft:
     AND #%00000010
     BEQ CheckRight
 
+    ;Check mode
+        LDA GameMode
+        AND #$01
+        BEQ WalkLeft
+        JSR SpawnNote
+        JMP CheckRight
 
+    WalkLeft:
     LDA entities+Entity::xpos
     CLC
     SBC #$01
@@ -558,6 +601,15 @@ CheckRight:
     LDA buttons
     AND #%00000001
     BEQ EndButtons
+
+    ;Check mode
+        LDA GameMode
+        AND #$01
+        BEQ WalkRight
+        JSR SpawnNote  
+        JMP EndButtons
+
+        WalkRight:
 
     LDA entities+Entity::xpos
     CLC
@@ -605,6 +657,35 @@ AddNote:
 EndNoteSpawn:
     RTS
 
+SpawnFire:
+    LDX #$00
+FireLoop:
+    CPX #TOTALENTITIES ; Check whether we're at the end of allowed entities
+    BEQ EndNoteSpawn
+; Check if the current index has nothing in it   
+    LDA entities+Entity::type, X 
+    CMP #$00 ; NO TYPE
+    BEQ AddNote
+    TXA 
+    CLC 
+    ADC #.sizeof(Entity) ; This adds to the X index so that we can keep looping through all entitiy memory
+    TAX
+    JMP FireLoop
+
+AddFire:
+    LDA entities+Entity::xpos
+    CLC 
+    ADC #$10
+    STA entities+Entity::xpos, X
+    LDA entities+Entity::ypos
+    STA entities+Entity::ypos, X
+    LDA #$03 ; fire type
+    STA entities+Entity::type, X 
+    JMP EndFireSpawn 
+
+EndFireSpawn:
+    RTS
+
 IncFrameCount:
     SixtyFrame:
         INC framecount
@@ -642,6 +723,8 @@ ProcessEntities:
         BEQ ProcessPlayer
         CMP #$02 ; note id
         BEQ ProcessNote
+        CMP #$03
+        BEQ ProcessFire
         JMP SkipEntity
     ProcessPlayer:
         LDA entities+Entity::ypos, X
@@ -677,12 +760,23 @@ ProcessEntities:
         CMP #$FE
         BNE EntityComplete
         JMP ClearEntity
+    ProcessFire:
+        LDA entities+Entity::xpos, X 
+        CLC
+        ADC #$01
+        STA entities+Entity::xpos, X
+        CMP #$FE
+        BNE EntityComplete
+        JMP ClearEntity        
     ClearEntity:
         LDA #EntityType::NoEntity
         STA entities+Entity::type, X
         LDA #$FF 
         STA entities+Entity::xpos, X
         STA entities+Entity::ypos, X
+ 
+
+
 
     EntityComplete:
     SkipEntity:
@@ -700,18 +794,31 @@ ProcessEntities:
     NOP
 RTS
 
-DoScroll: ; When the player moves towards the right scroll the screen with them
+DoScroll: ; check if the player is at the edge of the scree   
+
     LDA entities+Entity::xpos
     CLC  
-    CMP #$C8
-    BCS ScrollRight
+    CMP #$F0
+    BEQ ScrollRight
     JMP EndDoScroll
     ScrollRight:
-        INC ScrollY
-    EndDoScroll:
+        JSR DoRightScroll
+        
+    EndDoScroll: 
 RTS  
     
-
+DoRightScroll:
+    LDA ScrollX
+    CMP #$FF 
+    BEQ :+
+    INC ScrollX ;Scroll X needs to change by a factor of 256 
+    ;INC ScrollX 
+    JMP EndDoRightScroll
+    :
+    LDA #$00
+    STA entities+Entity::xpos
+EndDoRightScroll:
+RTS
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -749,6 +856,8 @@ OAMBuffer:
         BEQ DrawPlayerJmp
         CMP #$02
         BEQ DrawNoteJmp
+        CMP #$03
+        BEQ DrawFireJmp
         JMP EndSpriteDraw
 
 
@@ -758,7 +867,9 @@ OAMBuffer:
     DrawPlayerJmp:
         JMP DrawPlayer
     DrawNoteJmp:
-        JMP DrawNote ;
+        JMP DrawNote 
+    DrawFireJmp:
+        JMP DrawFire
     ;;;;   
 
     DrawPlayer:
@@ -852,7 +963,22 @@ OAMBuffer:
         ADC  #$10
         STA SpriteBuffer, Y
         INY
+        JMP CheckEndSpriteDraw
 
+    DrawFire:
+        LDA entities+Entity::ypos, X
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::spriteno, X
+        STA SpriteBuffer, Y 
+        INY 
+        LDA #$00
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::xpos, X
+        STA SpriteBuffer, Y 
+        INY  
+        JMP CheckEndSpriteDraw
     
     CheckEndSpriteDraw:
         TXA 
@@ -889,12 +1015,17 @@ APURegs:
 
 ;Todo: Compression of worldata
 
+WorldMap:
+    .byte $1, $2, $3
+    .byte $4, $5, $6
+    .byte $7, $8, $9
+
 WorldData: ; Each row is 32
     .byte $29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29 ; Overscan blank line
-    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
-    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
-    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$27,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $1D,$12,$16,$0E,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
 
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
     .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
     .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
     .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
