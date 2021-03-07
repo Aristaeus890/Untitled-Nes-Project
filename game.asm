@@ -52,7 +52,7 @@
     sineindex: .res 1
    
 
-    MAXENTITIES = 2
+    MAXENTITIES = 5
     entities: .res .sizeof(Entity) * MAXENTITIES
     TOTALENTITIES = .sizeof(Entity) * MAXENTITIES
 
@@ -61,9 +61,13 @@
     thirtyframe: .res 1
     fifteenframe: .res 1
     ButtonFlag: .res 1
-    GameMode: .res 1 ; 0=walk, 1=sing etc  
-    return: .res 1 
+    temp: .res 1 ; 0=walk, 1=sing etc  
+    boxx1: .res 1
+    boxy1: .res 1
+    boxx2: .res 1
+    boxy2: .res 1 
     CurrentTile: .res 1
+    return: .res 1 
 
 ;; This tells the nes what to do when it starts up
 ;; We basically disable most things initially and initialise some others
@@ -323,7 +327,7 @@ Loop:
     ;JSR PlaySound   ; does nothing atm except play an annoying noise
     JSR WaveFlip    ; This index simply flips between 1 and 0. Used for directional variance
     JSR NoteIndex   ; This changes the note sprite that will spawn
-    ;JSR SpawnFire
+    JSR SpawnFire
     JSR ReadButtons ; Duh
     JSR ProcessEntities ; All entity behaviour is handled here
     JSR IncFrameCount   ; Counts to 59 then resets to 0
@@ -536,13 +540,6 @@ CheckUp:
         AND #%00001000
         BEQ CheckDown  
 
-        ;Check mode
-        LDA GameMode
-        AND #$01
-        BEQ WalkUp
-        JSR SpawnNote
-        JMP CheckDown
-
         WalkUp:
         LDA entities+Entity::ypos
         CLC
@@ -557,17 +554,11 @@ CheckDown:
     AND #%00000100
     BEQ CheckLeft
 
-    ;Check mode
-        LDA GameMode
-        AND #$01
-        BEQ WalkDown
-        JSR SpawnNote
-        JMP CheckLeft
-
     WalkDown:
     LDA entities+Entity::ypos
     CLC
     ADC #$01
+    JSR CollideDown 
     STA entities+Entity::ypos
 
     LDA #$10
@@ -579,13 +570,6 @@ CheckLeft:
     LDA buttons
     AND #%00000010
     BEQ CheckRight
-
-    ;Check mode
-        LDA GameMode
-        AND #$01
-        BEQ WalkLeft
-        JSR SpawnNote
-        JMP CheckRight
 
     WalkLeft:
     LDA entities+Entity::xpos
@@ -608,13 +592,6 @@ CheckRight:
     LDA buttons
     AND #%00000001
     BEQ EndButtons
-
-    ;Check mode
-        LDA GameMode
-        AND #$01
-        BEQ WalkRight
-        JSR SpawnNote  
-        JMP EndButtons
 
     WalkRight:
 
@@ -682,11 +659,9 @@ FireLoop:
     JMP FireLoop
 
 AddFire:
-    LDA entities+Entity::xpos
-    CLC 
-    ADC #$10
+    LDA #$0F
     STA entities+Entity::xpos, X
-    LDA entities+Entity::ypos
+    LDA #$B1
     STA entities+Entity::ypos, X
     LDA #$03 ; fire type
     STA entities+Entity::type, X
@@ -771,10 +746,10 @@ ProcessEntities:
         LDA entities+Entity::xpos, X 
         CLC
         ADC #$01
-        JSR PlayerCollide
         STA entities+Entity::xpos, X
-        CMP #$F0
-        JMP EntityComplete ;BCC change
+        JSR PlayerCollide
+        CMP #$F1
+        BCC EntityComplete ;BCC change
         JMP ClearEntity
     ProcessPlayerTwo:
         JMP EntityComplete
@@ -782,7 +757,7 @@ ProcessEntities:
     ClearEntity:
         LDA #EntityType::NoEntity
         STA entities+Entity::type, X
-        LDA #$FF 
+        LDA #$00
         STA entities+Entity::xpos, X
         STA entities+Entity::ypos, X
  
@@ -834,7 +809,7 @@ PlayerCollide:
     :
     LDA #EntityType::NoEntity
     STA entities+Entity::type
-    LDA #$FF 
+    LDA #$00 
     STA entities+Entity::xpos
     STA entities+Entity::ypos
     
@@ -873,6 +848,64 @@ DoRightScroll:
     STA entities+Entity::xpos
 EndDoRightScroll:
 RTS
+
+;;;;;;;;;
+;;Collision madoodles
+;;;;;;;
+
+CollideDown:
+    ; This starts with the assumption that you have the y position of the player in the A register
+    ; LSR 3 times to divide by 8 (the size of our tiles on the tile map)
+    STA temp
+    LSR 
+    LSR 
+    LSR 
+    STA boxy1
+    STA boxy2 
+
+    LDA entities+Entity::xpos
+    LSR 
+    LSR 
+    LSR 
+    STA boxx1 
+    CLC 
+    ADC #$02 ; The sprite width is 16, divide that by 8 to account for the tile map 
+    STA boxx2
+
+    LDA boxy1
+    ASL 
+    ASL 
+    ASL 
+    CLC 
+    ADC boxx1
+
+    TAX 
+    LDA TileMap, X 
+    CMP #$01
+    BNE CollideOneClear
+    LDA temp 
+    RTS  
+    CollideOneClear:
+    LDA boxy2 
+    ASL 
+    ASL 
+    ASL 
+    CLC
+    ADC boxx2 
+
+    TAX 
+    LDA TileMap, X 
+    CMP #$01 
+    BNE FinishDownCollide
+    LDA temp
+    RTS 
+
+FinishDownCollide:
+    LDA entities+Entity::ypos
+RTS 
+
+
+
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1166,7 +1199,7 @@ WorldMap:
 WorldData: ; Each row is 32
     .byte $29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29 ; Overscan blank line
     .byte $24,$27,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
-    .byte $1D,$12,$16,$0E,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $24,$1D,$12,$16,$0E,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
 
     .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
     .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
@@ -1244,9 +1277,46 @@ WorldData2: ; Each row is 32
     .byte $47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47  
     .byte $29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29; Overscan blank line
 
+TileMap:
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01
+    .byte $01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01
 
 
-
+    .byte $01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01
+    .byte $01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01
+    
 .segment "VECTORS"      ; This part just defines what labels to go to whenever the nmi or reset is called 
     .word NMI           ; If you look at someone elses stuff they probably call this vblank or something
     .word Reset
