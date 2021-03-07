@@ -875,13 +875,14 @@ CollideDown:
     LDA boxy1
     ASL 
     ASL 
+    ASL
     ASL 
     CLC 
     ADC boxx1
 
     TAX 
     LDA TileMap, X 
-    CMP #$01
+    CMP #$00
     BNE CollideOneClear
     LDA temp 
     RTS  
@@ -889,13 +890,14 @@ CollideDown:
     LDA boxy2 
     ASL 
     ASL 
-    ASL 
+    ASL
+    ASL  
     CLC
     ADC boxx2 
 
     TAX 
     LDA TileMap, X 
-    CMP #$01 
+    CMP #$00 
     BNE FinishDownCollide
     LDA temp
     RTS 
