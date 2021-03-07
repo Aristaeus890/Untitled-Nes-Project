@@ -877,6 +877,7 @@ CollideDown:
     ASL 
     ASL
     ASL 
+    ASL 
     CLC 
     ADC boxx1
 
@@ -892,6 +893,7 @@ CollideDown:
     ASL 
     ASL
     ASL  
+    ASL 
     CLC
     ADC boxx2 
 
