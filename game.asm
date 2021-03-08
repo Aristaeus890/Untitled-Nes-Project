@@ -873,11 +873,14 @@ CollideDown:
     STA boxx2
 
     LDA boxy1
-    ASL 
-    ASL 
-    ASL
-    ASL 
-    ASL 
+    ASL ;2
+    ASL ;4
+    ASL ;8 
+    ASL ;16
+    ASL ;32
+    ASL ;64 
+    ASL ;128
+    ASL ;256
     CLC 
     ADC boxx1
 
@@ -892,11 +895,14 @@ CollideDown:
     RTS  
     CollideOneClear:
     LDA boxy2 
-    ASL 
-    ASL 
-    ASL
-    ASL  
-    ASL 
+    ASL ;2
+    ASL ;4
+    ASL ;8 
+    ASL ;16
+    ASL ;32
+    ASL ;64 
+    ASL ;128
+    ASL ;256 
     CLC
     ADC boxx2 
 
