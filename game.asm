@@ -557,9 +557,9 @@ CheckDown:
     WalkDown:
     LDA entities+Entity::ypos
     CLC
-    ADC #$01
-    JSR CollideDown 
+    ADC #$01 
     STA entities+Entity::ypos
+    JSR CollideDown
 
     LDA #$10
     STA entities+Entity::spriteno
@@ -856,7 +856,7 @@ RTS
 CollideDown:
     ; This starts with the assumption that you have the y position of the player in the A register
     ; LSR 3 times to divide by 8 (the size of our tiles on the tile map)
-    STA temp
+    LDA entities+Entity::ypos 
     LSR 
     LSR 
     LSR 
@@ -878,6 +878,7 @@ CollideDown:
     ASL
     ASL 
     ASL 
+    ASL 
     CLC 
     ADC boxx1
 
@@ -885,7 +886,10 @@ CollideDown:
     LDA TileMap, X 
     CMP #$00
     BNE CollideOneClear
-    LDA temp 
+    LDA entities+Entity::ypos
+    CLC 
+    SBC #$01
+    STA entities+Entity::ypos
     RTS  
     CollideOneClear:
     LDA boxy2 
@@ -894,6 +898,7 @@ CollideDown:
     ASL
     ASL  
     ASL 
+    ASL 
     CLC
     ADC boxx2 
 
@@ -901,11 +906,14 @@ CollideDown:
     LDA TileMap, X 
     CMP #$00 
     BNE FinishDownCollide
-    LDA temp
-    RTS 
+    LDA entities+Entity::ypos
+    CLC 
+    SBC #$01
+    STA entities+Entity::ypos
+    RTS
 
 FinishDownCollide:
-    LDA entities+Entity::ypos
+    
 RTS 
 
 
@@ -1282,10 +1290,10 @@ WorldData2: ; Each row is 32
     .byte $29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29; Overscan blank line
 
 TileMap:
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01
+    .byte $01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01
+    .byte $01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01
+    .byte $01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01
 
     .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
     .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
