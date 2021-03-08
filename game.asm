@@ -877,10 +877,6 @@ CollideDown:
     ASL ;4
     ASL ;8 
     ASL ;16
-    ASL ;32
-    ASL ;64 
-    ASL ;128
-    ASL ;256
     CLC 
     ADC boxx1
 
@@ -898,11 +894,7 @@ CollideDown:
     ASL ;2
     ASL ;4
     ASL ;8 
-    ASL ;16
-    ASL ;32
-    ASL ;64 
-    ASL ;128
-    ASL ;256 
+    ASL ;16 
     CLC
     ADC boxx2 
 
