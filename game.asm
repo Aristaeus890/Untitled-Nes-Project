@@ -32,42 +32,42 @@
 ;todo: entities currently cant be moved bc references to its abs loc in other places 
 .segment "ZEROPAGE" ; LSB 0 - FF
 ;; Reserve memory for some specific things we need not to be futzed with
-    SpriteMem: .res 2
-    world: .res 2  ; 1-2
-    buttons: .res 1 ; 3
+    SpriteMem: .res 2 ; unused
+    world: .res 2  ; used during startup, not after that
+    buttons: .res 1 ; used for polling controller
     nmidone: .res 1 ; ppu is done when this is 1 ;
-    framecount: .res 1 ; 6. This will increment once per frame and reset over 59 (0 counts)
-    twocount: .res 1
-    ScrollX: .res 1 ;   7
-    ScrollY: .res 1 ;   8
-    FlipSprite: .res 1 ; 0 is right, 1 is left
-    animation: .res 1
-    XOffset: .res 1
-    YOffset: .res 1
-    moving: .res 1
-    anioffset: .res 1
-    facing: .res 1
-    facingframe: .res 1
-    playeraddress: .res 2
-    sineindex: .res 1
-   
+    framecount: .res 1 ;  This will increment once per frame and reset over 59 (0 counts)
+    twocount: .res 1   ; flips every frame
+    ScrollX: .res 1 ;   scroll L/R
+    ScrollY: .res 1 ;   scroll u/d
+    FlipSprite: .res 1 ; 0 is right, 1 is left, not used atm
+    animation: .res 1 ; unused 
+    XOffset: .res 1 ; unused
+    YOffset: .res 1 ; unused
+    moving: .res 1 ;unused
+    anioffset: .res 1 ; unused
+    facing: .res 1 ; player facing direction determines sprite
+    facingframe: .res 1 ; unused?
+    playeraddress: .res 2 ; unused
+    sineindex: .res 1 ; unused
+   ;NB DO NOT DELETE ANY OF THESE EVEN IF THEY AREN'T BEING USED IT WILL MESS UP THE ENTITY HANDLER ATM
 
-    MAXENTITIES = 5
-    entities: .res .sizeof(Entity) * MAXENTITIES
+    MAXENTITIES = 5 ; max allowed number of entities
+    entities: .res .sizeof(Entity) * MAXENTITIES 
     TOTALENTITIES = .sizeof(Entity) * MAXENTITIES
 
-    waveflip: .res 1
-    nextnote: .res 1
-    thirtyframe: .res 1
-    fifteenframe: .res 1
-    ButtonFlag: .res 1
-    temp: .res 1 ; 0=walk, 1=sing etc  
-    boxx1: .res 1
+    waveflip: .res 1 ; this is usedfor not movement
+    nextnote: .res 1 ; this is an offset that changes the spite of the not every time you create one
+    thirtyframe: .res 1 ; resets every 30 frames
+    fifteenframe: .res 1 ; resetsevery 15 frames
+    ButtonFlag: .res 1 ; used in controls for releasing a held button
+    temp: .res 1 ; 
+    boxx1: .res 1   ; collision box stuff
     boxy1: .res 1
     boxx2: .res 1
     boxy2: .res 1 
-    CurrentTile: .res 1
-    return: .res 1 
+    CurrentTile: .res 1 ; notused
+    return: .res 1  ; 
 
 ;; This tells the nes what to do when it starts up
 ;; We basically disable most things initially and initialise some others
@@ -111,7 +111,7 @@ CLEARMEM:
     STA $0600, X
     STA $0700, X
     LDA #$FF
-    STA $0200, X ; Sprite data goes here
+    STA $0200, X ; Sprite/entity data goes here
     LDA #$00
     INX
     BNE CLEARMEM    ; Keep incrementing so you clear out the whole thing
@@ -277,11 +277,11 @@ SetAttributes:
 ;    LDA #$40
 ;    STA $4017
 
-SetPlayerPos:
+SetPlayerPos: ; initial player position
     LDA #$F0
     STA entities+Entity::xpos
 
-SetMirroring:
+SetMirroring: ; Doesn't work atm? Not sure if the mapper is incorrectly set up
     LDA #$80
     STA $8000
     LDA $00
@@ -304,7 +304,7 @@ SetMirroring:
 ; map some memory baabbbby!
 ; All sprite data is to be stored here and retrieved every frame
 SpriteBuffer = $0200
-LDA #$20
+LDA #$20 ; put this somewhere else? 
 STA nextnote
 
 ; Enable interrupts
@@ -325,11 +325,12 @@ STA nextnote
 ; It runs through the whole game loop, then waits for the screen to be drawn then loops back to the beginning.
 Loop:
     ;JSR PlaySound   ; does nothing atm except play an annoying noise
-    JSR WaveFlip    ; This index simply flips between 1 and 0. Used for directional variance
+    JSR WaveFlip    ; This simply flips between 1 and 0. Used for directional variance
     JSR NoteIndex   ; This changes the note sprite that will spawn
-    JSR SpawnFire
+    JSR SpawnFire   ; spawns a fireball as long as there's available mem
     JSR ReadButtons ; Duh
-    JSR ProcessEntities ; All entity behaviour is handled here
+    JSR CollideDown ; Think about moving this together with movement?
+    JSR ProcessEntities ; entity behaviour is handled here, the player has some special stuff elsewhere
     JSR IncFrameCount   ; Counts to 59 then resets to 0
     ;JSR DoScroll    
     JSR OAMBuffer   ; Sprite data is written to the buffer here
@@ -381,7 +382,7 @@ RTS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ; Wipe the sprite buffer
-;;; TODO: Make buffer wiping dynamic based on what's in there.
+;;; TODO: Make buffer wiping dynamic, wastes cycles clearing empty space
 ClearSpriteBuffer:
     LDX #$00
     LDA #$FF 
@@ -392,7 +393,7 @@ ClearSpriteBuffer:
         BNE ClearBufferLoop 
     RTS
 
-PlaySound:
+PlaySound: ; unused atm
     LDA #<279
     STA $4002
 
@@ -404,6 +405,7 @@ PlaySound:
 RTS 
 
 ;This flips a byte back between 1/0
+; I feel like this could be more efficient
 WaveFlip:
     LDA thirtyframe ; this can be changed. Currently useful with 15,30,60 frame
     CMP #$00
@@ -421,7 +423,7 @@ WaveFlip:
     EndFlip:
 RTS
 
-NoteIndex:
+NoteIndex: ; Change the next note sprite that will be spawned
     INC nextnote
     LDA nextnote
     CMP #$24
@@ -453,7 +455,7 @@ ReadButtons:
     LDA $4016
     ROR A           ; Shift the A byte into the carry flag
     ROL buttons     ; Shift the A byte from the carry flag to the first position of Buttons
-
+    ; get B etc
     LDA $4016
     ROR A           ; Shift the A byte into the carry flag
     ROL buttons     ; Shift the A byte from the carry flag to the first position of Buttons
@@ -482,28 +484,27 @@ ReadButtons:
     ROR A           ; Shift the A byte into the carry flag
     ROL buttons     ; Shift the A byte from the carry flag to the first position of Buttons
 
-; Currently has no effect. May use later
 
 
 
-;;;;;;;;;;;;;;;; Controls for when the gamemode is 0 and the player can walkaround
-; two seperate controls improves visibility but takes morespace. Reconsider?
-    LDA buttons
-    AND #%10000000
+
+;;;;;;;;;;;;;;;; Controls for when player can walkaround
+    LDA buttons 
+    AND #%10000000 ; if the first nibble is set then a is pressed
     BEQ CheckARelease
-    LDA ButtonFlag
+    LDA ButtonFlag ; if the button is pressed, set this so that we can check release next frame
     ORA #$01
     STA ButtonFlag
     JMP CheckB
 
-    CheckARelease:
+    CheckARelease: ; If the button isn't pressed, check whether it was pressed last frame and released
         LDA ButtonFlag
         AND #$01
         BEQ CheckB
         LDA ButtonFlag
         EOR #$01 
         STA ButtonFlag
-        JSR SpawnNote   
+        JSR SpawnNote   ; Any behaviour can go here and will happen when the button is released
 
 CheckB:
 
@@ -559,8 +560,6 @@ CheckDown:
     CLC
     ADC #$01 
     STA entities+Entity::ypos
-    JSR CollideDown
-
     LDA #$10
     STA entities+Entity::spriteno
 
@@ -581,7 +580,7 @@ CheckLeft:
     LDA #$00
     STA entities+Entity::spriteno
 
-    ; set facing to 1 if moving left
+    ; set facing to 1 if moving left, does nothingatm
     LDA #$01
     STA facing
 
@@ -609,7 +608,9 @@ CheckRight:
 EndButtons:
     RTS 
  
-
+;;;;;;
+; Entitity creation
+;;;;;;
 
 SpawnNote:
     LDX #$00
@@ -627,11 +628,11 @@ NoteLoop:
     JMP NoteLoop
 
 AddNote:
-    LDA entities+Entity::xpos
+    LDA entities+Entity::xpos ; get player xpos
     CLC 
-    ADC #$01
-    STA entities+Entity::xpos, X
-    LDA entities+Entity::ypos
+    ADC #$01 ;offset slightly the player pos
+    STA entities+Entity::xpos, X ; set the new entity position
+    LDA entities+Entity::ypos ; ditto for the y 
     SBC #$02
     STA entities+Entity::ypos, X
     LDA #$02 ; note type
@@ -672,7 +673,7 @@ AddFire:
 EndFireSpawn:
     RTS
 
-IncFrameCount:
+IncFrameCount: ; TODO why does this use x, just use a
     SixtyFrame:
         INC framecount
         LDX framecount
@@ -701,7 +702,11 @@ IncFrameCount:
 
 RTS
 
-ProcessEntities:
+;;;;;;;;
+;; entitiy processsing 
+;;;;;;;;
+
+ProcessEntities: ; TODO at some point there are going to be too many entity behaviours and BEQ wont branch far enough. Add a jmp index?
     LDX #$00
     ProcessEntitiesLoop:
         LDA entities+Entity::type, X 
@@ -718,6 +723,7 @@ ProcessEntities:
     ProcessPlayer:
         ;JSR PlayerCollide
         JMP EntityComplete
+
     ProcessNote:
         LDA waveflip
         CMP #$00
@@ -742,12 +748,13 @@ ProcessEntities:
         CMP #$FE
         BNE EntityComplete
         JMP ClearEntity
-    ProcessFire:
+
+    ProcessFire: ; move fire right
         LDA entities+Entity::xpos, X 
         CLC
         ADC #$01
         STA entities+Entity::xpos, X
-        ;JSR PlayerCollide
+        ;JSR PlayerCollide ; turned off for testing, does work
         CMP #$F1
         BCC EntityComplete ;BCC change
         JMP ClearEntity
@@ -774,12 +781,13 @@ ProcessEntities:
     BNE ProcessEntitiesLoop
 
     DoneProcessingEntities:
-    NOP
+    NOP ;NOPE!
     NOP
     NOP
     NOP
 RTS
 
+; this attaches to an object and checks if that object is colliding with the player
 PlayerCollide:
     LDA entities+Entity::xpos
     CLC 
@@ -794,12 +802,14 @@ PlayerCollide:
     CMP entities+Entity::xpos 
     BCS:+
     RTS
+    ; check 3
     : LDA entities+Entity::ypos
     CLC 
     ADC #$0F 
     CMP entities+Entity::ypos, X 
     BCS:+
     RTS
+    ; check 4
     : LDA entities+Entity::ypos, X 
     CLC 
     ADC #$08 
@@ -807,6 +817,7 @@ PlayerCollide:
     BCS:+
     RTS
     :
+    ; whatever is here happens when there is a collide
     LDA #EntityType::NoEntity
     STA entities+Entity::type
     LDA #$00 
@@ -815,7 +826,7 @@ PlayerCollide:
     
     RTS 
 
-DestroyPlayer:
+DestroyPlayer: ; unused atm
     LDA #$00
     STA entities+Entity::xpos
     STA entities+Entity::ypos
@@ -854,13 +865,16 @@ RTS
 ;;;;;;;
 
 CollideDown:
-    ; LSR 3 times to divide by 8 (the size of our tiles on the tile map)
+    LDA #$00
+    STA return
+    ; LSR 4 times to divide by 16 (the size of our tiles on the tile map)
     LDA entities+Entity::ypos
     CLC 
-    ADC #$0F  
+    ADC #$0F ; add an offset of 16 for total entity height  
     LSR 
     LSR 
     LSR 
+    LSR
     STA boxy1
     STA boxy2 
 
@@ -868,50 +882,53 @@ CollideDown:
     LSR 
     LSR 
     LSR 
+    LSR
     STA boxx1 
     CLC 
-    ADC #$02 ; The sprite width is 16, divide that by 8 to account for the tile map 
+    ADC #$01 ; The sprite width is 16, divide that by 16 to account for the tile map 
     STA boxx2
 
-    LDA boxy1
-    ASL ;2
-    ASL ;4
-    ASL ;8 
-    ASL ;16
-    CLC 
-    ADC boxx1
+    CheckCollideOne:
+        LDA boxy1 ; x16 for the width of the tile map
+        ASL ;2
+        ASL ;4
+        ASL ;8
+        ASL ; 16
+        CLC 
+        ADC boxx1
 
-    TAX 
-    LDA TileMap, X 
-    CMP #$00
-    BNE CollideOneClear
-    LDA entities+Entity::ypos
-    CLC 
-    SBC #$01
-    STA entities+Entity::ypos
-    RTS  
-    CollideOneClear:
+    
+        TAX ; move to x so can be index
+        STX return ; for debug 
+        LDA TileMap, X 
+        CMP #$01
+        BEQ Collide
+  
+    CheckCollideTwo:
     LDA boxy2 
     ASL ;2
     ASL ;4
-    ASL ;8 
-    ASL ;16 
+    ASL ;8
+    ASL 
     CLC
     ADC boxx2 
 
-    TAX 
+    TAX
+    STX return 
     LDA TileMap, X 
-    CMP #$00 
-    BNE FinishDownCollide
-    LDA entities+Entity::ypos
-    CLC 
-    SBC #$01
-    STA entities+Entity::ypos
+    CMP #$01 
+    BEQ Collide
     RTS
 
-FinishDownCollide:
-    
-RTS 
+    Collide:
+        LDA #$01 
+        STA return
+        LDA entities+Entity::ypos
+        CLC 
+        SBC #$01
+        STA entities+Entity::ypos
+        RTS
+
 
 
 
@@ -923,7 +940,7 @@ RTS
 
 OAMBuffer:
 
-    JSR ClearSpriteBuffer
+    JSR ClearSpriteBuffer 
 
     BlankOutMem:
         ;LDA #$01 ; PLAYER TYPE
@@ -972,11 +989,7 @@ OAMBuffer:
         JMP DrawPlayerTwo
     ;;;;   
 
-    DrawPlayer:
-        ; Check facing 
-
-
-
+    DrawPlayer:;
         LDA entities+Entity::ypos, X 
         STA SpriteBuffer, Y 
         INY 
@@ -1052,10 +1065,7 @@ OAMBuffer:
 
         JMP CheckEndSpriteDraw
 
-DrawPlayerTwo:
-        ; Check facing 
-
-
+DrawPlayerTwo: ; this is a pallete swap p1 but currently isn't spawned
 
         LDA entities+Entity::ypos, X 
         STA SpriteBuffer, Y 
@@ -1188,10 +1198,10 @@ PaletteData:
   .byte $22,$29,$1A,$0F,$22,$36,$17,$0f,$22,$30,$21,$0f,$22,$27,$17,$0F  ;background palette data
   .byte $22,$27,$14,$1A,$22,$1A,$30,$27,$22,$16,$30,$27,$22,$0F,$36,$17  ;sprite palette data
 
-Sine:
+Sine: ; unused, potential use for wave pattern
     .byte $01,$02,$03,$04,$05,$06,$07,$06,$05,$04,$03,$02,$FF
 
-APURegs:
+APURegs: ; sound, unused
     .byte $30,$08,$00,$00
     .byte $30,$08,$00,$00
     .byte $80,$00,$00,$00
@@ -1200,7 +1210,7 @@ APURegs:
 
 ;Todo: Compression of worldata
 
-WorldMap:
+WorldMap: ; test, unused
     .byte $1, $2, $3
     .byte $4, $5, $6
     .byte $7, $8, $9
@@ -1286,49 +1296,29 @@ WorldData2: ; Each row is 32
     .byte $47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47,$47  
     .byte $29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29; Overscan blank line
 
-TileMap:
-    .byte $01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01
-    .byte $01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01
-    .byte $01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01
-    .byte $01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01
-
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+TileMap: ;1= solid
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01
     
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$01,$01
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
 
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
-    
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
 
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
-    
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
-    .byte $01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01
-    .byte $01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01
-
-
-    .byte $01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01
-    .byte $01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+    .byte $01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01
     
 .segment "VECTORS"      ; This part just defines what labels to go to whenever the nmi or reset is called 
     .word NMI           ; If you look at someone elses stuff they probably call this vblank or something
     .word Reset
      
-.segment "CHARS"
+.segment "CHARS" ; sprite/tile data goes here
     .incbin "zelda.chr"
