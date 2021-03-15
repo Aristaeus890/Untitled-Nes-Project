@@ -73,6 +73,9 @@
     ; 0     1
     ; 2     3
     return: .res 1  ; 
+    dxhigh: .res 1
+    dxlow: .res 1
+
 
 ;; This tells the nes what to do when it starts up
 ;; We basically disable most things initially and initialise some others
@@ -148,7 +151,7 @@ INIT_ENTITIES:
     ;LDA #$10 
     ;STA entities+Entity::spriteno
 
-    LDX #.sizeof(Entity) ; add/sub 4 for each entity you want loaded initially
+    LDX #.sizeof(Entity) 
     LDA #$FF
 
 CLEARENTITIES:
@@ -376,6 +379,7 @@ Loop:
     JSR ProcessEntities ; entity behaviour is handled here, the player has some special stuff elsewhere
     JSR IncFrameCount   ; Counts to 59 then resets to 0
     ;JSR DoScroll    
+    JSR XMovement
     JSR OAMBuffer   ; Sprite data is written to the buffer here
     
 ; Once the game logic loop is done, we hover here and wait for a vblank
@@ -648,11 +652,14 @@ CheckLeft:
     BEQ CheckRight
 
     WalkLeft:
-    LDA entities+Entity::xpos
-    SEC 
-    SBC #$01
-    STA entities+Entity::xpos
+    LDA dxlow
+    CLC
+    SBC #$10
+    STA dxlow
 
+    LDA dxhigh
+    SBC #$00
+    STA dxhigh
 
     LDA #$00
     STA entities+Entity::spriteno
@@ -672,14 +679,14 @@ CheckRight:
     BEQ EndButtons
 
     WalkRight:
-    LDA entities+Entity::xposlow
+    LDA dxlow
     CLC 
-    ADC #$40
-    STA entities+Entity::xposlow 
+    ADC #$10
+    STA dxlow 
 
-    LDA entities+Entity::xpos
-    ADC #$01
-    STA entities+Entity::xpos
+    LDA dxhigh
+    ADC #$00
+    STA dxhigh
 
     LDA #$00
     STA entities+Entity::spriteno
@@ -1249,7 +1256,75 @@ CollideUp:
         STA entities+Entity::xpos
         RTS
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; movement mechanics
+;;;;;;;;;;;;;;;;;;;;;;;;;
 
+XMovement:
+    ; get movement
+    ; apply friction
+    ; if dx too high, limit it
+
+    ; check for postive/negative
+    LDA dxhigh
+    CMP #$00
+    BEQ EndXMovement
+
+    BIT dxhigh
+    BPL LimitDXP   ; If its positive, branch
+
+    LimitDXN:
+        JSR FrictionN
+        LDA dxhigh
+        CMP #$FD 
+        BCS AddDX
+        LDA #$FD
+        STA dxhigh
+        LDA #$00
+        STA dxlow
+
+    LimitDXP:
+        JSR FrictionP
+        LDA dxhigh
+        CMP #$02
+        BCC AddDX
+        LDA #$02
+        STA dxhigh
+        LDA #$00
+        STA dxlow
+
+
+    AddDX:
+    LDA entities+Entity::xposlow
+    CLC 
+    ADC dxlow 
+    STA entities+Entity::xposlow
+    LDA entities+Entity::xpos
+    ADC dxhigh
+    STA entities+Entity::xpos
+ 
+EndXMovement:
+RTS
+
+FrictionN:
+    LDA dxlow
+    CLC 
+    ADC #$02
+    STA dxlow
+    LDA dxhigh
+    ADC #$00
+    STA dxhigh
+RTS 
+
+FrictionP:
+    LDA dxlow
+    CLC 
+    SBC #$02
+    STA dxlow
+    LDA dxhigh
+    SBC #$00
+    STA dxhigh
+RTS
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Write to the OAM Buffer
@@ -1536,7 +1611,7 @@ WorldMap: ; test, unused
     .byte $7, $8, $9
 
 WorldData: ; Each row is 32
-    .byte $2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C,$2C ; Overscan blank line
+    .byte $32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32 ; Overscan blank line
     .byte $2C,$2D,$30,$2C,$2D,$30,$2C,$2D,$30,$2C,$2D,$30,$2C,$2D,$30,$2C,$2D,$30,$2C,$2D,$30,$2C,$2D,$30,$2C,$2D,$30,$2C,$2D,$30,$2C,$2D  
     .byte $2E,$2F,$31,$2E,$2F,$31,$2E,$2F,$31,$2E,$2F,$31,$2E,$2F,$31,$2E,$2F,$31,$2E,$2F,$31,$2E,$2F,$31,$2E,$2F,$31,$2E,$2F,$31,$2E,$2F
 
@@ -1572,7 +1647,7 @@ WorldData: ; Each row is 32
     .byte $37,$38,$37,$38,$37,$38,$37,$38,$37,$38,$37,$38,$37,$38,$37,$38,$37,$38,$37,$38,$37,$38,$37,$38,$37,$38,$37,$38,$37,$38,$37,$38
 
     .byte $39,$3A,$39,$3A,$39,$3A,$39,$3A,$39,$3A,$39,$3A,$39,$3A,$39,$3A,$39,$3A,$39,$3A,$39,$3A,$39,$3A,$39,$3A,$39,$3A,$39,$3A,$39,$3A
-    .byte $29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29,$29; Overscan blank line
+    .byte $32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32; Overscan blank line
  
 
 WorldData2: ; Each row is 32
