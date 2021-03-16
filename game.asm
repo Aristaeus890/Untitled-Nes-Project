@@ -19,6 +19,7 @@
     Note = 2
     Fireball = 3
     PlayerTwoType = 4
+    Eurydice = 5
 .endscope
 
 .struct Entity
@@ -348,8 +349,12 @@ SpriteBuffer = $0200
 LDA #$20 ; put this somewhere else? 
 STA nextnote
 
-
+LDA #$00
+STA dxhigh
+LDA #$00
+STA dxlow
 ;JSR SpawnFire
+JSR SpawnEurydice
 ;JSR SpawnNote
 ; Enable interrupts
     CLI
@@ -376,10 +381,10 @@ Loop:
     ;JSR SpawnNote
     JSR ReadButtons ; Duh
     JSR CollideDown ; Think about moving this together with movement?
+    JSR XMovement
     JSR ProcessEntities ; entity behaviour is handled here, the player has some special stuff elsewhere
     JSR IncFrameCount   ; Counts to 59 then resets to 0
-    ;JSR DoScroll    
-    JSR XMovement
+    ;JSR DoScroll       
     JSR OAMBuffer   ; Sprite data is written to the buffer here
     
 ; Once the game logic loop is done, we hover here and wait for a vblank
@@ -649,12 +654,12 @@ CheckDown:
 CheckLeft:
     LDA buttons
     AND #%00000010
-    BEQ CheckRight
+    BNE CheckRight
 
     WalkLeft:
     LDA dxlow
     CLC
-    SBC #$10
+    SBC SpeedValue
     STA dxlow
 
     LDA dxhigh
@@ -681,7 +686,7 @@ CheckRight:
     WalkRight:
     LDA dxlow
     CLC 
-    ADC #$10
+    ADC #$12
     STA dxlow 
 
     LDA dxhigh
@@ -702,6 +707,34 @@ EndButtons:
 ;;;;;;
 ; Entitity creation
 ;;;;;;
+SpawnEurydice:
+    LDX #$00
+    EurydiceLoop:
+        CPX #TOTALENTITIES
+        BEQ EndEurydiceSpawn
+
+        LDA entities+Entity::type, X 
+        CMP #EntityType::NoEntity
+        BEQ AddEurydice
+        TXA 
+        CLC
+        ADC #.sizeof(Entity)
+        TAX 
+        JMP EurydiceLoop
+    AddEurydice:
+        LDA entities+Entity::xpos 
+        SEC 
+        SBC #$08
+        STA entities+Entity::xpos, X
+        LDA entities+Entity::ypos 
+        STA entities+Entity::ypos, X
+        LDA #EntityType::Eurydice
+        STA entities+Entity::type, X
+        LDA #$08
+        STA entities+Entity::spriteno, X
+        JMP EndEurydiceSpawn
+EndEurydiceSpawn:
+    RTS
 
 SpawnNote:
     LDX #$00
@@ -710,11 +743,11 @@ NoteLoop:
     BEQ EndNoteSpawn
 ; Checkif the current index has nothing in it   
     LDA entities+Entity::type, X 
-    CMP #$00 ; NO TYPE
+    CMP #EntityType::NoEntity ; NO TYPE
     BEQ AddNote
     TXA 
     CLC 
-    ADC #.sizeof(Entity) ; This adds to the X index so that we can keep looping through all entitiy memory
+    ADC #.sizeof(Entity) ; This adds to the X index so that we can keep looping through all entity memory
     TAX
     JMP NoteLoop
 
@@ -746,7 +779,7 @@ FireLoop:
     BEQ AddFire
     TXA 
     CLC 
-    ADC #.sizeof(Entity) ; This adds to the X index so that we can keep looping through all entitiy memory
+    ADC #.sizeof(Entity) ; This adds to the X index so that we can keep looping through all entity memory
     TAX
     JMP FireLoop
 
@@ -798,21 +831,23 @@ IncFrameCount: ; TODO why does this use x, just use a
 RTS
 
 ;;;;;;;;
-;; entitiy processsing 
+;; entity processsing 
 ;;;;;;;;
 
 ProcessEntities: ; TODO at some point there are going to be too many entity behaviours and BEQ wont branch far enough. Add a jmp index?
     LDX #$00
     ProcessEntitiesLoop:
         LDA entities+Entity::type, X 
-        CMP #$01 ; player id
+        CMP #EntityType::PlayerType ; player id
         BEQ ProcessPlayer
-        CMP #$02 ; note id
+        CMP #EntityType::Note ; note id
         BEQ ProcessNote
-        CMP #$03
+        CMP #EntityType::Fireball
         BEQ ProcessFire
         CMP #$04
         BEQ ProcessPlayerTwo
+        CMP #EntityType::Eurydice
+        BEQ ProcessEurydice
         JMP SkipEntity
 
     ProcessPlayer:
@@ -854,8 +889,36 @@ ProcessEntities: ; TODO at some point there are going to be too many entity beha
         CMP #$FF
         BCC EntityComplete ;BCC change
         JMP ClearEntity
+
     ProcessPlayerTwo:
         JMP EntityComplete
+
+    ProcessEurydice:
+        LDA facing
+        CMP #$00
+        BEQ :+
+        JMP ProcessEurydiceLeft
+        :
+        LDA entities+Entity::xpos 
+        SBC #$08
+        STA entities+Entity::xpos, X
+        LDA entities+Entity::ypos
+        LDY framecount
+        ADC VerticalWave, Y
+        STA entities+Entity::ypos, X
+        JMP EntityComplete
+
+        ProcessEurydiceLeft:
+            LDA entities+Entity::xpos 
+            ADC #$18
+            STA entities+Entity::xpos, X
+            LDA entities+Entity::ypos
+            LDY framecount
+            ADC VerticalWave, Y
+            STA entities+Entity::ypos, X
+            JMP EntityComplete
+
+
 
     ClearEntity:
         LDA #EntityType::NoEntity
@@ -877,8 +940,9 @@ ProcessEntities: ; TODO at some point there are going to be too many entity beha
     ADC #.sizeof(Entity)
     TAX 
     CMP #$1E   ; Max entities?
-    BNE ProcessEntitiesLoop
-
+    BEQ :+
+    JMP ProcessEntitiesLoop
+    :
     DoneProcessingEntities:
     NOP ;NOPE!
     NOP
@@ -1276,13 +1340,13 @@ XMovement:
     LimitDXN:
         JSR FrictionN
         LDA dxhigh
-        CMP #$FD 
+        CMP #$FE 
         BCS AddDX
-        LDA #$FD
+        LDA #$FE
         STA dxhigh
         LDA #$00
         STA dxlow
-
+        JMP AddDX
     LimitDXP:
         JSR FrictionP
         LDA dxhigh
@@ -1309,7 +1373,7 @@ RTS
 FrictionN:
     LDA dxlow
     CLC 
-    ADC #$02
+    ADC FrictionValue
     STA dxlow
     LDA dxhigh
     ADC #$00
@@ -1318,8 +1382,8 @@ RTS
 
 FrictionP:
     LDA dxlow
-    CLC 
-    SBC #$02
+    SEC
+    SBC FrictionValue
     STA dxlow
     LDA dxhigh
     SBC #$00
@@ -1355,16 +1419,18 @@ OAMBuffer:
     ; This checks the entity type of the current entity then branches accordingly
     DrawSprites:
         LDA entities+Entity::type, X 
-        CMP #$00
+        CMP #EntityType::NoEntity
         BEQ NoEntityJmp
-        CMP #$01
+        CMP #EntityType::PlayerType
         BEQ DrawPlayerJmp
-        CMP #$02
+        CMP #EntityType::Note
         BEQ DrawNoteJmp
-        CMP #$03
+        CMP #EntityType::Fireball
         BEQ DrawFireJmp
         CMP #$04
         BEQ DrawPlayerTwoJmp
+        CMP #EntityType::Eurydice
+        BEQ DrawEurydiceJump
         JMP EndSpriteDraw
 
 
@@ -1379,9 +1445,16 @@ OAMBuffer:
         JMP DrawFire
     DrawPlayerTwoJmp:
         JMP DrawPlayerTwo
+    DrawEurydiceJump:
+        JMP DrawEurydice
     ;;;;   
 
-    DrawPlayer:;
+    DrawPlayer:
+        LDA facing 
+        CMP #$00
+        BEQ :+
+        JMP DrawPlayerLeft
+        :
         LDA entities+Entity::ypos, X 
         STA SpriteBuffer, Y 
         INY 
@@ -1389,7 +1462,7 @@ OAMBuffer:
         STA SpriteBuffer, Y 
         INY 
         LDA #$00
-        STA SpriteBuffer, Y 
+        STA SpriteBuffer, Y
         INY
         LDA entities+Entity::xpos, X
         STA SpriteBuffer, Y
@@ -1454,8 +1527,82 @@ OAMBuffer:
         ADC #$08
         STA SpriteBuffer, Y
         INY
-
         JMP CheckEndSpriteDraw
+
+        DrawPlayerLeft:
+
+        LDA entities+Entity::ypos, X 
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::spriteno
+        STA SpriteBuffer, Y 
+        INY 
+        LDA #%01000000
+        STA SpriteBuffer, Y
+        INY
+        LDA entities+Entity::xpos, X
+        CLC
+        ADC #$08
+        STA SpriteBuffer, Y
+        INY
+        
+
+        ;Sprite 2
+
+        LDA entities+Entity::ypos, X
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::spriteno
+        CLC 
+        ADC #$01
+        STA SpriteBuffer, Y 
+        INY 
+        LDA #%01000000
+        STA SpriteBuffer, Y 
+        INY
+        LDA entities+Entity::xpos, X
+        STA SpriteBuffer, Y
+        INY
+         
+
+        ;sprite 3
+        LDA entities+Entity::ypos, X
+        ADC #$08 
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::spriteno
+        CLC
+        ADC #$02
+        STA SpriteBuffer, Y 
+        INY 
+        LDA #%01000000
+        STA SpriteBuffer, Y 
+        INY
+        LDA entities+Entity::xpos, X
+        CLC
+        ADC #$08
+        STA SpriteBuffer, Y
+        INY
+        
+
+        ;sprite 4
+        LDA entities+Entity::ypos, X
+        ADC #$08 
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::spriteno
+        CLC 
+        ADC #$03
+        STA SpriteBuffer, Y 
+        INY 
+        LDA #%01000000
+        STA SpriteBuffer, Y 
+        INY
+        LDA entities+Entity::xpos, X
+        STA SpriteBuffer, Y
+        INY
+        JMP CheckEndSpriteDraw 
+
 
 DrawPlayerTwo: ; this is a pallete swap p1 but currently isn't spawned
 
@@ -1567,6 +1714,21 @@ DrawPlayerTwo: ; this is a pallete swap p1 but currently isn't spawned
         INY  
         JMP CheckEndSpriteDraw
     
+    DrawEurydice:
+        LDA entities+Entity::ypos, X
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::spriteno, X
+        STA SpriteBuffer, Y 
+        INY 
+        LDA #$01
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::xpos, X
+        STA SpriteBuffer, Y 
+        INY  
+        JMP CheckEndSpriteDraw    
+
     CheckEndSpriteDraw:
         TXA 
         CLC 
@@ -1586,9 +1748,19 @@ NMI:            ; this happens once a frame when the draw arm mabob is returning
     JMP MAINLOOP
     RTI
 
+FrictionValue:
+    .byte $09
+
+SpeedValue: ; nb, this includes the friction as an offset so change themboth if you change 1!
+    .byte $19
+
+VerticalWave:
+    .byte $00,$01,$01,$01,$01,$02,$02,$02,$02,$02,$02,$03,$03,$03,$03,$03,$03,$03,$03,$02,$02,$02,$02,$02,$02,$02,$01,$01,$01,$01
+    .byte $00,$FF,$FF,$FF,$FF,$FE,$FE,$FE,$FE,$FE,$FE,$FD,$FD,$FD,$FD,$FD,$FD,$FD,$FD,$FE,$FE,$FE,$FE,$FE,$FE,$02,$FF,$FF,$FF,$FF
+
 PaletteData:
-  .byte $0F,$2D,$27,$0F,$0F,$02,$03,$04,$0F,$06,$07,$08,$0F,$1A,$1B,$1C  ;background palette data
-  .byte $22,$27,$14,$1A,$22,$1A,$30,$27,$22,$16,$30,$27,$30,$0F,$36,$17  ;sprite palette data
+  .byte $0F,$27,$17,$0F,$0F,$02,$03,$04,$0F,$06,$07,$08,$0F,$1A,$1B,$1C  ;background palette data
+  .byte $22,$27,$14,$1A,  $22,$10,$04,$03,  $04,$16,$30,$27,$30,$0F,$36,$17  ;sprite palette data
 
 AttributeData: 
     .byte %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
