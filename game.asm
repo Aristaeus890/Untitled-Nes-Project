@@ -22,6 +22,12 @@
     Eurydice = 5
 .endscope
 
+.scope MapTileNo
+    MapZero = 0
+    MapOne = 1
+    MapTwo = 2
+.endscope
+
 .struct Entity
     xpos .byte
     xposlow .byte
@@ -52,7 +58,7 @@
     facing: .res 1 ; player facing direction determines sprite
     facingframe: .res 1 ; unused?
     playeraddress: .res 2 ; unused
-    sineindex: .res 1 ; unused
+    mapposindex: .res 1 ; unused
    ;NB DO NOT DELETE ANY OF THESE EVEN IF THEY AREN'T BEING USED IT WILL MESS UP THE ENTITY HANDLER ATM
 
     MAXENTITIES = 5
@@ -391,7 +397,7 @@ STA dxlow
 ;Set Zeropage variables
 LDA #$01
 STA pageY
-LDA #$01
+LDA #$02
 STA pageX
 
 ;JSR SpawnEurydice
@@ -415,6 +421,7 @@ STA pageX
 ; It runs through the whole game loop, then waits for the screen to be drawn then loops back to the beginning.
 Loop:
     ;JSR PlaySound   ; does nothing atm except play an annoying noise
+    
     JSR DoWorldMap 
     JSR WaveFlip    ; This simply flips between 1 and 0. Used for directional variance
     JSR NoteIndex   ; This changes the note sprite that will spawn
@@ -544,6 +551,10 @@ RTS
 ;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;;;;;;;;;;
+;; World Map functions go here
+;;;;;;;;;;
+
 ; Get the player position in the world map
 DoWorldMap:
     LDA pageY
@@ -552,7 +563,7 @@ DoWorldMap:
     ASL
     CLC 
     ADC pageX
-    STA temp ; temp = current plaer pos on the world map 
+    STA mapposindex ; current plaer pos on the world map 
     
     CheckWorldMapRight:
     ADC #$01
@@ -568,7 +579,7 @@ DoWorldMap:
     STA allowrightscroll
 
     CheckWorldMapLeft:
-    LDA temp 
+    LDA mapposindex 
     SEC 
     SBC #$01
     TAX 
@@ -582,10 +593,47 @@ DoWorldMap:
     LDA #$00
     STA allowleftscroll
 
+           
 EndDoWorldMap:
 RTS   
 
+GetMapPosRight:
+    LDA mapposindex
+    CLC 
+    ADC #$01
+    TAX 
+    LDA WorldMap, X 
+    CMP #MapTileNo::MapZero
+    BEQ SetWorldDataZero
+    CMP #MapTileNo::MapOne
+    BEQ SetWorldDataOne
+    CMP #MapTileNo::MapTwo
+    BEQ SetWorldDataTwo
+    JMP EndGetMapPosRight
 
+    SetWorldDataZero:
+        LDA #< WorldData
+        STA world 
+        LDA #> WorldData
+        STA world+1
+        JMP EndGetMapPosRight
+
+    SetWorldDataOne:
+        LDA #< WorldData2
+        STA world 
+        LDA #> WorldData2
+        STA world+1
+        JMP EndGetMapPosRight
+
+    SetWorldDataTwo:
+        LDA #< WorldData3
+        STA world 
+        LDA #> WorldData3
+        STA world+1
+        JMP EndGetMapPosRight
+
+    EndGetMapPosRight:
+RTS
 
 ; Wipe the sprite buffer
 ;;; TODO: Make buffer wiping dynamic, wastes cycles clearing empty space
@@ -1158,6 +1206,7 @@ RTS
         LDA ScrollBoundary
         STA entities+Entity::xpos
     EndDoRightScroll:
+        JSR GetMapPosRight
         JSR CheckRightDraw
     RTS
 
@@ -1167,16 +1216,19 @@ RTS
         BEQ DrawRightColumn
         RTS
         DrawRightColumn: ; divide by 8 for each tile
-            ; Inrecent the coloumn number. If it hits the limit wrap around 
+            ; Inrecent the column number. If it hits the limit wrap around 
+
             LDA columnnumber
             CLC 
             ADC #$01
-            AND #%00011111
-            STA columnnumber
+            ;AND #%00011111
+            CMP #$21
             BNE :+
             INC pageX
-            :  
-
+            LDA #$01
+            :
+            STA columnnumber
+        
 
             LDA ScrollX
             LSR 
@@ -1193,10 +1245,6 @@ RTS
             STA columnhigh
 
             
-
-            LDA Columnflag
-            EOR #$01
-            STA Columnflag
             LDA DrawColumnFlag ; set a flag that a new coloumn needs to be drawn to the nametable
             EOR #$01
             STA DrawColumnFlag       
@@ -1224,13 +1272,14 @@ RTS
 
     CheckLeftDraw:
         LDA ScrollX
-        AND #%00000110
+        AND #%00000111
         BEQ DrawLeftColumn
         RTS 
         DrawLeftColumn:
+            DEC columnnumber
             LDA columnnumber
-            SEC 
-            SBC #$01
+            ;SEC 
+            ;SBC #$01
             AND #%00011111
             STA columnnumber
             BNE :+
@@ -1539,11 +1588,11 @@ XMovement:
     LimitDXN:
         JSR FrictionN
         LDA dxhigh
-        CMP #$FE 
+        CMP #$FF 
         BCS AddDX
         CMP #$00
         BEQ AddDX
-        LDA #$FE
+        LDA #$FF
         STA dxhigh
         LDA #$00
         STA dxlow
@@ -2020,12 +2069,14 @@ WriteToTileBuffer:
 
 
     WriteColumnToBuffer:
-        LDA #< WorldData ; take the low byte
+        LDA world ; take the low byte
         STA columnaddress ; store low byte in z page
-        LDA #> WorldData ; take the high byte
+        LDA world+1 ; take the high byte
         STA columnaddress+1 ; store high into the world address +1 i.e the second byte of the address
 
         LDA columnnumber
+        SEC 
+        SBC #$01
         CLC 
         ADC columnaddress
         STA columnaddress 
@@ -2057,6 +2108,8 @@ RTS
         STA columnaddress+1
 
         LDA columnnumber
+        SEC
+        SBC #$01
         CLC 
         ADC columnaddress
         STA columnaddress
@@ -2112,21 +2165,11 @@ PaletteData:
 AttributeData: 
     .byte %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
 
-Sine: ; unused, potential use for wave pattern
-    .byte $01,$02,$03,$04,$05,$06,$07,$06,$05,$04,$03,$02,$FF
-
-APURegs: ; sound, unused
-    .byte $30,$08,$00,$00
-    .byte $30,$08,$00,$00
-    .byte $80,$00,$00,$00
-    .byte $30,$00,$00,$00
-    .byte $00,$00,$00,$00        
-
 ;Todo: Compression of worldata
 
 WorldMap: ; read into this index to get screendata and when not to scroll further
     .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF 
-    .byte $00, $00, $01, $02, $03, $04, $05, $FF
+    .byte $FF, $00, $01, $02, $FF, $04, $05, $FF
     .byte $FF, $06, $07, $08, $09, $0A, $0B, $FF
     .byte $FF, $0C, $0D, $0E, $0F, $10, $11, $FF
     .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
@@ -2173,7 +2216,7 @@ WorldData: ; Each row is 32
  
 
 WorldData2: ; Each row is 32
-    .byte $32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32 ; Overscan blank line
+    .byte $32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$31 ; Overscan blank line
     .byte $2C,$2D,$30,$2C,$2D,$30,$2C,$2D,$30,$2C,$2D,$30,$2C,$2D,$30,$2C,$2D,$30,$2C,$2D,$30,$2C,$2D,$30,$2C,$2D,$30,$2C,$2D,$30,$2C,$2D
 
     .byte $2E,$2F,$31,$2E,$2F,$31,$2E,$2F,$31,$2E,$2F,$31,$2E,$2F,$31,$2E,$2F,$31,$2E,$2F,$31,$2E,$2F,$31,$2E,$2F,$31,$2E,$2F,$31,$2E,$2F
@@ -2194,7 +2237,7 @@ WorldData2: ; Each row is 32
     .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$36
     .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$35
 
-    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$36
+    .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$56,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$36
     .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$35
     .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$36
     .byte $24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$35
