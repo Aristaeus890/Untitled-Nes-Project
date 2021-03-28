@@ -20,6 +20,13 @@
     Fireball = 3
     PlayerTwoType = 4
     Eurydice = 5
+    NoteStatic = 6
+.endscope
+
+.scope GameMode
+    Game = 0
+    Sing = 1
+    Title = 2
 .endscope
 
 .scope MapTileNo
@@ -61,7 +68,7 @@
     mapposindex: .res 1 ; unused
    ;NB DO NOT DELETE ANY OF THESE EVEN IF THEY AREN'T BEING USED IT WILL MESS UP THE ENTITY HANDLER ATM
 
-    MAXENTITIES = 5
+    MAXENTITIES = 10
      ; max allowed number of entities
     entities: .res .sizeof(Entity) * MAXENTITIES 
     TOTALENTITIES = .sizeof(Entity) * MAXENTITIES
@@ -75,7 +82,8 @@
     thirtyframe: .res 1 ; resets every 30 frames
     fifteenframe: .res 1 ; resetsevery 15 frames
     ButtonFlag: .res 1 ; used in controls for releasing a held button
-    temp: .res 1 ; 
+    temp: .res 1 ;
+    temp2: .res 1 
     boxx1: .res 1   ; collision box stuff
     boxy1: .res 1
     boxx2: .res 1
@@ -93,6 +101,11 @@
     columnaddress: .res 2
     allowrightscroll: .res 1
     allowleftscroll: .res 1
+    gamemode: .res 1
+    noteflag: .res 1
+    notecount: .res 1
+    paletteaddress: .res 2
+    updatebackgroundpaletteflag: .res 1
 ;; This tells the nes what to do when it starts up
 ;; We basically disable most things initially and initialise some others
 
@@ -352,9 +365,9 @@ SetAttributes2:
 ;    STA $4017
 
 SetPlayerPos: ; initial player position
-    LDA #$80
+    LDA #$40
     STA entities+Entity::xpos
-    LDA #$60
+    LDA #$30
     STA entities+Entity::xpos
 
     LDA #< WorldData ; take the low byte
@@ -373,6 +386,7 @@ SetPlayerPos: ; initial player position
 ; Sprite buffer takes 4x64 = 256 bytes
 SpriteBuffer = $0200 ;$0200 -> $02FF
 TileBuffer = $0300 ; $0300 -> 031F
+PaletteBuffer = $0320 ; 03320 ->033F 
 
 FillTileBuffer:
 LDA #$22
@@ -397,9 +411,11 @@ STA dxlow
 ;Set Zeropage variables
 LDA #$01
 STA pageY
-LDA #$02
+LDA #$01
 STA pageX
 
+JSR UpdatePalleteBuffer
+JSR SpawnFourNotes
 ;JSR SpawnEurydice
 
 ; Enable interrupts
@@ -420,16 +436,13 @@ STA pageX
 ;This is the forever loop, it goes here whenever its taken out of the NMI intterupt loop. Here is *ideally* where non draw stuff will happen...
 ; It runs through the whole game loop, then waits for the screen to be drawn then loops back to the beginning.
 Loop:
-    ;JSR PlaySound   ; does nothing atm except play an annoying noise
-    
     JSR DoWorldMap 
     JSR WaveFlip    ; This simply flips between 1 and 0. Used for directional variance
     JSR NoteIndex   ; This changes the note sprite that will spawn
-    ;JSR SpawnFire   ; spawns a fireball as long as there's available mem
-    ;JSR SpawnNote
     JSR ReadButtons ; Duh
+    ;JSR SingMode
     JSR CollideDown ; Think about moving this together with movement?
-    JSR XMovement
+    ;JSR XMovement ; the player movement
     JSR ProcessEntities ; entity behaviour is handled here, the player has some special stuff elsewhere
     JSR IncFrameCount   ; Counts to 59 then resets to 0
     JSR DoScroll       
@@ -465,7 +478,7 @@ MAINLOOP:
     JSR DrawColumnNMI
     JSR ReadSprites ; Get the sprites from the sprite buffer and write them to the ppu  
     JSR ReadScroll  ; Send the current scroll to the ppu
-
+    JSR UpdatePalleteNMI
 
     LDA #%10010000
     ORA currenttable
@@ -758,8 +771,11 @@ ReadButtons:
         LDA ButtonFlag
         EOR #$01 
         STA ButtonFlag
-        JSR SpawnNote   ; Any behaviour can go here and will happen when the button is released
-
+       ; Any behaviour can go here and will happen when the button is released
+        LDA gamemode
+        EOR #$01
+        STA gamemode
+        JSR ChangePalleteBlack
 CheckB:
 
     LDA buttons 
@@ -777,7 +793,7 @@ CheckB:
         LDA ButtonFlag
         EOR #$02 
         STA ButtonFlag
-        JSR SpawnFire
+        JSR ChangePalleteOrange
 
 
 CheckSelect:
@@ -937,6 +953,95 @@ AddNote:
 EndNoteSpawn:
     RTS
 
+
+SpawnFourNotes:
+    LDX #$00
+    LDY #$00
+
+    LDA entities+Entity::xpos 
+    SEC 
+    SBC #$1B
+    STA temp
+
+    LDA entities+Entity::ypos
+    SEC 
+    SBC #$0A 
+    STA temp2
+
+    SpawnFourNotesLoop:
+    CPX #TOTALENTITIES
+    BEQ EndSpawnFourNotes
+    LDA entities+Entity::type, X
+    CMP #EntityType::NoEntity ; NO TYPE
+    BEQ AddFourNotes
+    TXA 
+    CLC 
+    ADC #.sizeof(Entity) ; This adds to the X index so that we can keep looping through all entity memory
+    TAX 
+    JMP SpawnFourNotesLoop
+
+AddFourNotes:
+    CPY #$02
+    BCS AddFourNotes2
+
+    TYA  
+    ASL 
+    ASL 
+    ASL
+    ASL
+    ASL 
+    CLC 
+    ADC temp 
+    STA entities+Entity::xpos, X 
+    LDA entities+Entity::ypos ; ditto for the y 
+    CLC 
+    ADC #$04
+    STA entities+Entity::ypos, X
+    LDA #EntityType::NoteStatic ; note type
+    STA entities+Entity::type, X
+    TYA 
+    CLC 
+    ADC nextnote
+    STA entities+Entity::spriteno, X 
+
+    INY 
+    JMP SpawnFourNotesLoop  
+
+AddFourNotes2:
+    LDA entities+Entity::xpos
+    SEC 
+    SBC #$0C ;;; TODO: WHY IS TIS NEEDED?
+    STA entities+Entity::xpos, X
+    
+    
+    TYA 
+    SEC 
+    SBC #$02
+    ASL 
+    ASL
+    ASL 
+    ASL 
+    ASL 
+    CLC 
+    ADC temp2
+    STA entities+Entity::ypos, X
+    LDA #EntityType::NoteStatic
+    STA entities+Entity::type, X 
+    TYA  
+    CLC 
+    ADC nextnote
+    STA entities+Entity::spriteno, X
+    
+    CPY #$03
+    BEQ EndSpawnFourNotes
+    INY  
+    JMP SpawnFourNotesLoop
+
+
+
+EndSpawnFourNotes:
+RTS    
+
 SpawnFire:
     LDX #$00
 FireLoop:
@@ -1017,10 +1122,12 @@ ProcessEntities: ; TODO at some point there are going to be too many entity beha
         BEQ ProcessPlayerTwo
         CMP #EntityType::Eurydice
         BEQ ProcessEurydice
+        CMP #EntityType::NoteStatic
+        BEQ ProcessNoteStatic
         JMP SkipEntity
 
     ProcessPlayer:
-        ;JSR PlayerCollide
+        JSR XMovement
         JMP EntityComplete
 
     ProcessNote:
@@ -1087,7 +1194,8 @@ ProcessEntities: ; TODO at some point there are going to be too many entity beha
             STA entities+Entity::ypos, X
             JMP EntityComplete
 
-
+    ProcessNoteStatic:
+        JMP EntityComplete
 
     ClearEntity:
         LDA #EntityType::NoEntity
@@ -1640,6 +1748,89 @@ FrictionP:
     STA dxhigh
 RTS
 
+;;;;;;;;;;
+; Stuff to do with singing
+;;;;;;;;;;;;
+
+SingMode:
+    LDA SingMode
+    CMP #$00
+    BNE :+
+    RTS
+    : 
+
+    LDA noteflag
+    CMP #$00
+    BNE :+
+    RTS
+    :
+RTS
+
+;;;;;;
+; Palette functions
+;;;;;
+ChangePalleteBlack:
+    LDA #< BackGroundPaletteBlack
+    STA paletteaddress
+    LDA #> BackGroundPaletteBlack
+    STA paletteaddress+1
+    JMP UpdatePalleteBuffer
+
+ChangePalleteOrange: 
+    LDA #< PaletteData
+    STA paletteaddress
+    LDA #> PaletteData
+    STA paletteaddress+1
+    JMP UpdatePalleteBuffer
+
+
+UpdatePalleteBuffer:
+    LDA updatebackgroundpaletteflag
+    EOR #$01
+    STA updatebackgroundpaletteflag
+    
+    LDY #$00
+    UpdatePalleteBufferLoop:
+    LDA (paletteaddress), Y
+    STA PaletteBuffer, Y 
+    CPY #$20
+    BEQ :+
+    INY
+    JMP UpdatePalleteBufferLoop
+    : 
+RTS
+
+UpdatePalleteNMI:
+    LDA updatebackgroundpaletteflag
+    CMP #$01
+    BNE EndUpdatePalleteNMI
+
+
+    LDA #$3F
+    STA $2006
+    LDA #$00
+    STA $2006
+
+    LDY #$00
+
+    ;; Increment through the Pallete data and store it into the PPU
+    LoadPalettesNMI:
+        LDA PaletteBuffer, Y
+        STA $2007 ; $3F00, $3F01, $3F02 => $3F1F
+        INY
+        CPY #$20
+        BNE LoadPalettesNMI
+
+        LDA updatebackgroundpaletteflag
+        EOR #$01
+        STA updatebackgroundpaletteflag
+        
+EndUpdatePalleteNMI:
+RTS    
+
+    
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Write to the OAM Buffer
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1681,6 +1872,8 @@ OAMBuffer:
         BEQ DrawPlayerTwoJmp
         CMP #EntityType::Eurydice
         BEQ DrawEurydiceJump
+        CMP #EntityType::NoteStatic
+        BEQ DrawNoteStaticJump
         JMP EndSpriteDraw
 
 
@@ -1697,6 +1890,8 @@ OAMBuffer:
         JMP DrawPlayerTwo
     DrawEurydiceJump:
         JMP DrawEurydice
+    DrawNoteStaticJump:
+        JMP DrawNote
     ;;;;   
 
     DrawPlayer:
@@ -2159,8 +2354,12 @@ VerticalWave:
     .byte $00,$FF,$FF,$FF,$FF,$FE,$FE,$FE,$FE,$FE,$FE,$FD,$FD,$FD,$FD,$FD,$FD,$FD,$FD,$FE,$FE,$FE,$FE,$FE,$FE,$02,$FF,$FF,$FF,$FF
 
 PaletteData:
-  .byte $17,$00,$0C,$0F,  $0F,$07,$17,$0F,  $0F,$07,$10,$0F, $0F,$14,$15,$16  ;background palette data
-  .byte $17,$27,$14,$1A,  $22,$09,$1C,$0C,  $04,$16,$30,$27,$30,$0F,$36,$17  ;sprite palette data
+    .byte $17,$00,$0C,$0F,  $0F,$07,$17,$0F,  $0F,$07,$10,$0F, $0F,$14,$15,$16  ;background palette data  
+    .byte $17,$27,$14,$1A,  $22,$09,$1C,$0C,  $04,$16,$30,$27,$30,$0F,$36,$17  ;sprite palette data
+
+BackGroundPaletteBlack:
+    .byte $0F,$00,$0C,$0F,  $0F,$07,$17,$0F,  $0F,$07,$10,$0F, $0F,$14,$15,$16  ;background palette data  
+    .byte $0F,$27,$14,$1A,  $22,$09,$1C,$0C,  $04,$16,$30,$27,$30,$0F,$36,$17  ;sprite palette data
 
 AttributeData: 
     .byte %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
