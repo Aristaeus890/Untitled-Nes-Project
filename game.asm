@@ -769,6 +769,7 @@ ReadButtons:
     LDA ButtonFlag ; if the button is pressed, set this so that we can check release next frame
     ORA #$01
     STA ButtonFlag
+    JSR InputA
     JMP CheckB
 
     CheckARelease: ; If the button isn't pressed, check whether it was pressed last frame and released
@@ -779,9 +780,7 @@ ReadButtons:
         EOR #$01 
         STA ButtonFlag
        ; Any behaviour can go here and will happen when the button is released
-        LDA gamemode
-        EOR #$01
-        STA gamemode
+        JSR InputARelease
         ;JSR ChangePalleteBlack
 CheckB:
 
@@ -791,6 +790,7 @@ CheckB:
     LDA ButtonFlag
     ORA #$02
     STA ButtonFlag
+    JSR InputB
     JMP CheckSelect
 
     CheckBRelease:
@@ -800,7 +800,7 @@ CheckB:
         LDA ButtonFlag
         EOR #$02 
         STA ButtonFlag
-        JSR ChangePalleteOrange
+        JSR InputBRelease
 
 CheckSelect:
     LDA buttons
@@ -809,6 +809,7 @@ CheckSelect:
     LDA ButtonFlag
     ORA #$04 
     STA ButtonFlag
+    JSR InputSelect
     JMP CheckStart
 
     CheckSelectRelease:
@@ -818,6 +819,7 @@ CheckSelect:
         LDA ButtonFlag
         EOR #$04 
         STA ButtonFlag
+        JSR InputSelectRelease
 
 CheckStart:
     LDA buttons
@@ -826,6 +828,7 @@ CheckStart:
     LDA ButtonFlag
     ORA #$08
     STA ButtonFlag
+    JSR InputStart
     JMP CheckUp
 
     CheckStartRelease:
@@ -835,7 +838,7 @@ CheckStart:
         LDA ButtonFlag
         EOR #$08 
         STA ButtonFlag
-
+        JSR InputStartRelease
 
 CheckUp:  
     LDA buttons
@@ -844,18 +847,8 @@ CheckUp:
     LDA ButtonFlag
     ORA #$10
     STA ButtonFlag
-
-    WalkUp:
-        LDA entities+Entity::ypos
-        SEC 
-        SBC #$01
-        STA entities+Entity::ypos
-        LDA #$18
-        STA entities+Entity::spriteno
-        JSR CollideUp
-        JMP EndButtons
-
-    JMP CheckDown 
+    JSR InputUp
+    JMP EndButtons 
 
     CheckUpRelease:
         LDA ButtonFlag
@@ -864,7 +857,7 @@ CheckUp:
         LDA ButtonFlag 
         EOR #$10
         STA ButtonFlag
-        JSR InputNoteUp
+        JSR InputUpRelease
         
 CheckDown:
     LDA buttons
@@ -873,15 +866,7 @@ CheckDown:
     LDA ButtonFlag 
     ORA #$20 
     STA ButtonFlag 
-
-    WalkDown:
-    LDA entities+Entity::ypos
-    CLC
-    ADC #$01 
-    STA entities+Entity::ypos
-    LDA #$10
-    STA entities+Entity::spriteno
-
+    JSR InputDown
     JMP EndButtons
 
     CheckDownRelease:
@@ -891,7 +876,7 @@ CheckDown:
         LDA ButtonFlag
         EOR #$20 
         STA ButtonFlag
-        JSR InputNoteDown   
+        JSR InputDownRelease   
 
 CheckLeft:
     LDA buttons
@@ -900,20 +885,7 @@ CheckLeft:
     LDA ButtonFlag
     ORA #$40
     STA ButtonFlag 
-
-    WalkLeft:
-    LDA dxlow
-    SEC
-    SBC #$12
-    STA dxlow
-
-    LDA dxhigh
-    SBC #$00
-    STA dxhigh
-
-    LDA #$00
-    STA entities+Entity::spriteno
-    JSR CollideLeft
+    JSR InputLeft
     JMP EndButtons 
 
     CheckLeftRelease:
@@ -923,7 +895,7 @@ CheckLeft:
         LDA ButtonFlag
         EOR #$40 
         STA ButtonFlag
-        JSR InputNoteLeft
+        JSR InputLeftRelease
 
 CheckRight:
 
@@ -933,20 +905,7 @@ CheckRight:
     LDA ButtonFlag 
     ORA #$80 
     STA ButtonFlag
-
-    WalkRight:
-    LDA dxlow
-    CLC 
-    ADC #$12
-    STA dxlow 
-
-    LDA dxhigh
-    ADC #$00
-    STA dxhigh
-
-    LDA #$00
-    STA entities+Entity::spriteno
-    JSR CollideRight
+    JSR InputRight
 
     CheckRightRelease:
         LDA ButtonFlag
@@ -955,11 +914,142 @@ CheckRight:
         LDA ButtonFlag 
         EOR #$80 
         STA ButtonFlag
-        JSR InputNoteRight
+        JSR InputRightRelease
  
 EndButtons:
-    RTS 
+RTS 
  
+InputA:
+
+RTS 
+
+InputARelease:
+    JSR ChangePalleteOrange
+RTS
+
+InputB:
+    JSR ChangePalleteBlack
+RTS
+
+InputBRelease:
+ 
+RTS
+
+InputStart:
+
+RTS
+
+InputStartRelease:
+
+RTS
+
+InputSelect:
+
+RTS
+
+InputSelectRelease:
+    LDA gamemode 
+    EOR #$01 
+    STA gamemode
+RTS
+
+InputUp:
+    LDA gamemode
+    CMP #$00
+    BNE EndInputUp
+    WalkUp:
+        LDA entities+Entity::ypos
+        SEC 
+        SBC #$01
+        STA entities+Entity::ypos
+        LDA #$18
+        STA entities+Entity::spriteno
+        JSR CollideUp
+
+EndInputUp:
+RTS
+
+InputUpRelease:
+    LDA gamemode
+    CMP #$01
+    BNE :+
+    JSR InputNoteUp
+    :
+RTS
+
+InputDown:
+    LDA gamemode 
+    CMP #$00 
+    BNE EndInputDown
+    WalkDown:
+    LDA entities+Entity::ypos
+    CLC
+    ADC #$01 
+    STA entities+Entity::ypos
+    LDA #$10
+    STA entities+Entity::spriteno
+EndInputDown:    
+RTS
+
+InputDownRelease:
+    LDA gamemode
+    CMP #$01
+    BNE :+
+    JSR InputNoteDown
+    :
+RTS
+
+InputLeft:
+    LDA gamemode 
+    CMP #$00 
+    BNE EndInputLeft
+    
+    WalkLeft:
+    LDA dxlow
+    SEC
+    SBC #$12
+    STA dxlow
+    LDA dxhigh
+    SBC #$00
+    STA dxhigh
+    LDA #$00
+    STA entities+Entity::spriteno
+EndInputLeft:
+RTS
+
+InputLeftRelease:
+    LDA gamemode
+    CMP #$01
+    BNE :+
+    JSR InputNoteLeft
+    :
+RTS
+
+InputRight:
+    LDA gamemode 
+    CMP #$00 
+    BNE EndInputRight
+    WalkRight:
+    LDA dxlow
+    CLC 
+    ADC #$12
+    STA dxlow 
+    LDA dxhigh
+    ADC #$00
+    STA dxhigh
+    LDA #$00
+    STA entities+Entity::spriteno
+    JSR CollideRight
+EndInputRight:
+RTS
+
+InputRightRelease:
+    LDA gamemode
+    CMP #$01
+    BNE :+
+    JSR InputNoteRight
+    :
+RTS
 ;;;;;;
 ; Entitity creation
 ;;;;;;
@@ -1827,33 +1917,21 @@ RTS
 ; Stuff to do with singing
 ;;;;;;;;;;;;
 InputNoteUp:
-    LDA gamemode
-    CMP #$01
-    BNE ClearNoteMem
     LDA #$01
     LDX notecount
     STA NoteInputMem, X
     JMP CheckNoteMem 
 InputNoteDown:
-    LDA gamemode
-    CMP #$01
-    BNE ClearNoteMem
     LDA #$02
     LDX notecount
     STA NoteInputMem, X
     JMP CheckNoteMem
 InputNoteLeft:
-    LDA gamemode
-    CMP #$01
-    BNE ClearNoteMem
     LDA #$04
     LDX notecount
     STA NoteInputMem, X
     JMP CheckNoteMem
 InputNoteRight:
-    LDA gamemode
-    CMP #$01
-    BNE ClearNoteMem
     LDA #$08
     LDX notecount
     STA NoteInputMem, X
@@ -1886,14 +1964,8 @@ NoteMemCheckComplete:
 JSR ChangePalleteBlack
 
 ClearNoteMem:
-    LDX #$00
     LDA #$00
-    ClearNoteMemLoop:
-        STA NoteInputMem, X 
-        CPX #$03
-        BEQ EndNoteMem
-        INX
-        JMP ClearNoteMemLoop
+    STA notecount
 EndNoteMem:
 RTS
 
