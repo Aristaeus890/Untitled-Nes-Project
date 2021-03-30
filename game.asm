@@ -42,6 +42,7 @@
     yposlow .byte 
     type .byte
     spriteno .byte
+    palette .byte
 .endstruct
 
 
@@ -106,6 +107,8 @@
     notecount: .res 1
     paletteaddress: .res 2
     updatebackgroundpaletteflag: .res 1
+    notepalette: .res 1
+
 ;; This tells the nes what to do when it starts up
 ;; We basically disable most things initially and initialise some others
 
@@ -168,7 +171,6 @@ INIT_ENTITIES:
     STA entities+Entity::type
     LDA #$10
     STA entities+Entity::spriteno
-
     ; Temp object for testing
     ;LDX #$04
     ;LDA #$04
@@ -191,6 +193,7 @@ CLEARENTITIES:
     STA entities+Entity::yposlow, X
     LDA #$00
     STA entities+Entity::type, X
+    STA entities+Entity::palette, X
     LDA #$FF 
     INX
     INX
@@ -198,6 +201,7 @@ CLEARENTITIES:
     INX 
     INX 
     INX 
+    INX
     CPX #TOTALENTITIES
     BNE CLEARENTITIES
 
@@ -387,6 +391,8 @@ SetPlayerPos: ; initial player position
 SpriteBuffer = $0200 ;$0200 -> $02FF
 TileBuffer = $0300 ; $0300 -> 031F
 PaletteBuffer = $0320 ; 03320 ->033F 
+NoteInputMem = $0340 ; 0340 -> 0343
+
 
 FillTileBuffer:
 LDA #$22
@@ -414,8 +420,9 @@ STA pageY
 LDA #$01
 STA pageX
 
-JSR UpdatePalleteBuffer
+JSR ChangePalleteBlack
 JSR SpawnFourNotes
+JSR ChangePalleteOrange
 ;JSR SpawnEurydice
 
 ; Enable interrupts
@@ -775,7 +782,7 @@ ReadButtons:
         LDA gamemode
         EOR #$01
         STA gamemode
-        JSR ChangePalleteBlack
+        ;JSR ChangePalleteBlack
 CheckB:
 
     LDA buttons 
@@ -795,23 +802,50 @@ CheckB:
         STA ButtonFlag
         JSR ChangePalleteOrange
 
-
 CheckSelect:
     LDA buttons
     AND #%00100000
-    BEQ CheckStart    
+    BEQ CheckSelectRelease 
+    LDA ButtonFlag
+    ORA #$04 
+    STA ButtonFlag
+    JMP CheckStart
+
+    CheckSelectRelease:
+        LDA ButtonFlag
+        AND #$04 
+        BEQ CheckStart
+        LDA ButtonFlag
+        EOR #$04 
+        STA ButtonFlag
 
 CheckStart:
     LDA buttons
     AND #%00010000
-    BEQ CheckUp
+    BEQ CheckStartRelease
+    LDA ButtonFlag
+    ORA #$08
+    STA ButtonFlag
+    JMP CheckUp
 
-CheckUp:
-        LDA buttons
-        AND #%00001000
-        BEQ  CheckDown  
+    CheckStartRelease:
+        LDA ButtonFlag
+        AND #$08 
+        BEQ CheckUp
+        LDA ButtonFlag
+        EOR #$08 
+        STA ButtonFlag
 
-        WalkUp:
+
+CheckUp:  
+    LDA buttons
+    AND #%00001000
+    BEQ  CheckUpRelease
+    LDA ButtonFlag
+    ORA #$10
+    STA ButtonFlag
+
+    WalkUp:
         LDA entities+Entity::ypos
         SEC 
         SBC #$01
@@ -821,10 +855,24 @@ CheckUp:
         JSR CollideUp
         JMP EndButtons
 
+    JMP CheckDown 
+
+    CheckUpRelease:
+        LDA ButtonFlag
+        AND #$10
+        BEQ CheckDown
+        LDA ButtonFlag 
+        EOR #$10
+        STA ButtonFlag
+        JSR InputNoteUp
+        
 CheckDown:
     LDA buttons
     AND #%00000100
-    BEQ CheckLeft
+    BEQ CheckDownRelease 
+    LDA ButtonFlag 
+    ORA #$20 
+    STA ButtonFlag 
 
     WalkDown:
     LDA entities+Entity::ypos
@@ -836,10 +884,22 @@ CheckDown:
 
     JMP EndButtons
 
+    CheckDownRelease:
+        LDA ButtonFlag
+        AND #$20 
+        BEQ CheckLeft 
+        LDA ButtonFlag
+        EOR #$20 
+        STA ButtonFlag
+        JSR InputNoteDown   
+
 CheckLeft:
     LDA buttons
     AND #%00000010
-    BEQ CheckRight
+    BEQ CheckLeftRelease
+    LDA ButtonFlag
+    ORA #$40
+    STA ButtonFlag 
 
     WalkLeft:
     LDA dxlow
@@ -853,20 +913,26 @@ CheckLeft:
 
     LDA #$00
     STA entities+Entity::spriteno
-
-    ; set facing to 1 if moving left, does nothingatm
-    LDA #$01
-    STA facing
-
     JSR CollideLeft
-
     JMP EndButtons 
+
+    CheckLeftRelease:
+        LDA ButtonFlag
+        AND #$40 
+        BEQ CheckRight 
+        LDA ButtonFlag
+        EOR #$40 
+        STA ButtonFlag
+        JSR InputNoteLeft
 
 CheckRight:
 
     LDA buttons
     AND #%00000001
-    BEQ EndButtons
+    BEQ CheckRightRelease
+    LDA ButtonFlag 
+    ORA #$80 
+    STA ButtonFlag
 
     WalkRight:
     LDA dxlow
@@ -880,12 +946,17 @@ CheckRight:
 
     LDA #$00
     STA entities+Entity::spriteno
-
-    LDA #$00 
-    STA facing
-
     JSR CollideRight
 
+    CheckRightRelease:
+        LDA ButtonFlag
+        AND #$80
+        BEQ EndButtons
+        LDA ButtonFlag 
+        EOR #$80 
+        STA ButtonFlag
+        JSR InputNoteRight
+ 
 EndButtons:
     RTS 
  
@@ -957,6 +1028,7 @@ EndNoteSpawn:
 SpawnFourNotes:
     LDX #$00
     LDY #$00
+    STY notepalette
 
     LDA entities+Entity::xpos 
     SEC 
@@ -1003,7 +1075,8 @@ AddFourNotes:
     CLC 
     ADC nextnote
     STA entities+Entity::spriteno, X 
-
+    LDA notepalette
+    STA entities+Entity::palette, X
     INY 
     JMP SpawnFourNotesLoop  
 
@@ -1031,7 +1104,9 @@ AddFourNotes2:
     CLC 
     ADC nextnote
     STA entities+Entity::spriteno, X
-    
+    LDA notepalette
+    STA entities+Entity::palette, X
+
     CPY #$03
     BEQ EndSpawnFourNotes
     INY  
@@ -1046,7 +1121,7 @@ SpawnFire:
     LDX #$00
 FireLoop:
     CPX #TOTALENTITIES ; Check whether we're at the end of allowed entities
-    BEQ EndNoteSpawn
+    BEQ EndFireSpawn
 ; Check if the current index has nothing in it   
     LDA entities+Entity::type, X 
     CMP #$00 ; NO TYPE
@@ -1751,6 +1826,76 @@ RTS
 ;;;;;;;;;;
 ; Stuff to do with singing
 ;;;;;;;;;;;;
+InputNoteUp:
+    LDA gamemode
+    CMP #$01
+    BNE ClearNoteMem
+    LDA #$01
+    LDX notecount
+    STA NoteInputMem, X
+    JMP CheckNoteMem 
+InputNoteDown:
+    LDA gamemode
+    CMP #$01
+    BNE ClearNoteMem
+    LDA #$02
+    LDX notecount
+    STA NoteInputMem, X
+    JMP CheckNoteMem
+InputNoteLeft:
+    LDA gamemode
+    CMP #$01
+    BNE ClearNoteMem
+    LDA #$04
+    LDX notecount
+    STA NoteInputMem, X
+    JMP CheckNoteMem
+InputNoteRight:
+    LDA gamemode
+    CMP #$01
+    BNE ClearNoteMem
+    LDA #$08
+    LDX notecount
+    STA NoteInputMem, X
+    JMP CheckNoteMem
+CheckNoteMem:
+    LDA notecount
+    CMP #$03
+    BEQ ProcessNoteMem
+    INC notecount
+    RTS
+ProcessNoteMem:
+    LDX #$00
+    LDA NoteInputMem, X
+    CMP #$01
+    BNE ClearNoteMem
+    INX 
+    LDA NoteInputMem, X
+    CMP #$02
+    BNE ClearNoteMem
+    INX
+    LDA NoteInputMem, X
+    CMP #$04
+    BNE ClearNoteMem
+    INX 
+    LDA NoteInputMem, X
+    CMP #$08
+    BNE ClearNoteMem
+
+NoteMemCheckComplete:
+JSR ChangePalleteBlack
+
+ClearNoteMem:
+    LDX #$00
+    LDA #$00
+    ClearNoteMemLoop:
+        STA NoteInputMem, X 
+        CPX #$03
+        BEQ EndNoteMem
+        INX
+        JMP ClearNoteMemLoop
+EndNoteMem:
+RTS
 
 SingMode:
     LDA SingMode
@@ -1788,7 +1933,7 @@ UpdatePalleteBuffer:
     LDA updatebackgroundpaletteflag
     EOR #$01
     STA updatebackgroundpaletteflag
-    
+
     LDY #$00
     UpdatePalleteBufferLoop:
     LDA (paletteaddress), Y
@@ -2134,14 +2279,14 @@ DrawPlayerTwo: ; this is a pallete swap p1 but currently isn't spawned
         LDA entities+Entity::spriteno, X
         STA SpriteBuffer, Y 
         INY 
-        LDA #$03
+        LDA entities+Entity::palette, X
         STA SpriteBuffer, Y 
         INY
         LDA entities+Entity::xpos, X
         CLC
         ADC  #$10
         STA SpriteBuffer, Y
-        INY
+        INY 
         JMP CheckEndSpriteDraw
 
     DrawFire:
