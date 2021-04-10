@@ -21,6 +21,12 @@
     PlayerTwoType = 4
     Eurydice = 5
     NoteStatic = 6
+    UpButton = 7 
+    DownButton = 8
+    LeftButton = 9
+    RightButton = 10
+    AButton = 11
+    BButton = 12
 .endscope
 
 .scope GameMode
@@ -33,6 +39,10 @@
     MapZero = 0
     MapOne = 1
     MapTwo = 2
+    MapThree = 3
+    MapFour = 4
+    MapFive = 5
+    MapSix = 6
 .endscope
 
 .struct Entity
@@ -108,7 +118,11 @@
     paletteaddress: .res 2
     updatebackgroundpaletteflag: .res 1
     notepalette: .res 1
-
+    ScrollXEight: .res 1
+    sounddisableflag: .res 1
+    soundframecount: .res 1
+    sfxplaying: .res 1
+    sfxindex: .res 1
 ;; This tells the nes what to do when it starts up
 ;; We basically disable most things initially and initialise some others
 
@@ -371,7 +385,7 @@ SetAttributes2:
 SetPlayerPos: ; initial player position
     LDA #$40
     STA entities+Entity::xpos
-    LDA #$30
+    LDA #$A0
     STA entities+Entity::xpos
 
     LDA #< WorldData ; take the low byte
@@ -392,7 +406,7 @@ SpriteBuffer = $0200 ;$0200 -> $02FF
 TileBuffer = $0300 ; $0300 -> 031F
 PaletteBuffer = $0320 ; 03320 ->033F 
 NoteInputMem = $0340 ; 0340 -> 0343
-
+AudioMem = $0400
 
 FillTileBuffer:
 LDA #$22
@@ -408,6 +422,9 @@ LDX #$00
 LDA #$20 ; put this somewhere else? 
 STA nextnote
 
+LDA #$08
+STA ScrollXEight
+
 ;Set movespeed
 LDA #$00
 STA dxhigh
@@ -417,8 +434,12 @@ STA dxlow
 ;Set Zeropage variables
 LDA #$01
 STA pageY
-LDA #$01
+LDA #$03
 STA pageX
+
+; Enable the apu
+JSR SoundInit
+JSR SoundLoad
 
 JSR ChangePalleteBlack
 JSR SpawnFourNotes
@@ -443,13 +464,14 @@ JSR ChangePalleteOrange
 ;This is the forever loop, it goes here whenever its taken out of the NMI intterupt loop. Here is *ideally* where non draw stuff will happen...
 ; It runs through the whole game loop, then waits for the screen to be drawn then loops back to the beginning.
 Loop:
+
     JSR DoWorldMap 
     JSR WaveFlip    ; This simply flips between 1 and 0. Used for directional variance
     JSR NoteIndex   ; This changes the note sprite that will spawn
     JSR ReadButtons ; Duh
-    ;JSR SingMode
+    ;JSR SoundLoad
     JSR CollideDown ; Think about moving this together with movement?
-    ;JSR XMovement ; the player movement
+    JSR XMovement ; the player movement
     JSR ProcessEntities ; entity behaviour is handled here, the player has some special stuff elsewhere
     JSR IncFrameCount   ; Counts to 59 then resets to 0
     JSR DoScroll       
@@ -494,7 +516,7 @@ MAINLOOP:
 
     LDA #%00111110
     STA $2001
-
+    JSR SoundPlayFrame
     INC nmidone
 
     PLA
@@ -593,6 +615,8 @@ DoWorldMap:
     BNE :+
     LDA #$01
     STA allowrightscroll
+    LDA #$00
+    STA ScrollX
     JMP CheckWorldMapLeft
     :
     LDA #$00
@@ -629,6 +653,14 @@ GetMapPosRight:
     BEQ SetWorldDataOne
     CMP #MapTileNo::MapTwo
     BEQ SetWorldDataTwo
+    CMP #MapTileNo::MapThree
+    BEQ SetWorldDataThree
+    CMP #MapTileNo::MapFour
+    BEQ SetWorldDataFour
+    CMP #MapTileNo::MapFive
+    BEQ SetWorldDataFive
+    CMP #MapTileNo::MapSix
+    BEQ SetWorldDataSix
     JMP EndGetMapPosRight
 
     SetWorldDataZero:
@@ -639,9 +671,9 @@ GetMapPosRight:
         JMP EndGetMapPosRight
 
     SetWorldDataOne:
-        LDA #< WorldData2
+        LDA #< WorldData
         STA world 
-        LDA #> WorldData2
+        LDA #> WorldData
         STA world+1
         JMP EndGetMapPosRight
 
@@ -651,6 +683,37 @@ GetMapPosRight:
         LDA #> WorldData3
         STA world+1
         JMP EndGetMapPosRight
+
+    SetWorldDataThree:
+        LDA #< WorldData
+        STA world 
+        LDA #> WorldData
+        STA world+1
+        JMP EndGetMapPosRight
+
+    SetWorldDataFour:
+        LDA #< WorldData2
+        STA world 
+        LDA #> WorldData2
+        STA world+1
+        JMP EndGetMapPosRight
+
+    SetWorldDataFive:
+        LDA #< WorldData3
+        STA world 
+        LDA #> WorldData3
+        STA world+1
+        JMP EndGetMapPosRight
+
+    SetWorldDataSix:
+        LDA #< WorldData3
+        STA world 
+        LDA #> WorldData3
+        STA world+1
+        JMP EndGetMapPosRight
+
+
+
 
     EndGetMapPosRight:
 RTS
@@ -666,17 +729,6 @@ ClearSpriteBuffer:
         CPX #$30
         BNE ClearBufferLoop 
     RTS
-
-PlaySound: ; unused atm
-    LDA #<279
-    STA $4002
-
-    LDA #<279
-    STA $4003
-
-    LDA #%10111111
-    STA $4000
-RTS 
 
 ;This flips a byte back between 1/0
 ; I feel like this could be more efficient
@@ -883,7 +935,7 @@ CheckLeft:
     AND #%00000010
     BEQ CheckLeftRelease
     LDA ButtonFlag
-    ORA #$40
+    ORA #$40 
     STA ButtonFlag 
     JSR InputLeft
     JMP EndButtons 
@@ -1003,17 +1055,17 @@ InputLeft:
     LDA gamemode 
     CMP #$00 
     BNE EndInputLeft
-    
     WalkLeft:
     LDA dxlow
     SEC
-    SBC #$12
+    SBC #$10
     STA dxlow
     LDA dxhigh
     SBC #$00
     STA dxhigh
     LDA #$00
     STA entities+Entity::spriteno
+    JSR CollideLeft
 EndInputLeft:
 RTS
 
@@ -1278,21 +1330,82 @@ ProcessEntities: ; TODO at some point there are going to be too many entity beha
     ProcessEntitiesLoop:
         LDA entities+Entity::type, X 
         CMP #EntityType::PlayerType ; player id
-        BEQ ProcessPlayer
+        BEQ ProcessPlayerJump
         CMP #EntityType::Note ; note id
-        BEQ ProcessNote
+        BEQ ProcessNoteJump
         CMP #EntityType::Fireball
-        BEQ ProcessFire
-        CMP #$04
-        BEQ ProcessPlayerTwo
+        BEQ ProcessFireJump
+        CMP #EntityType::PlayerTwoType
+        BEQ ProcessPlayerTwoJump
         CMP #EntityType::Eurydice
-        BEQ ProcessEurydice
+        BEQ ProcessEurydiceJump
         CMP #EntityType::NoteStatic
-        BEQ ProcessNoteStatic
+        BEQ ProcessNoteStaticJump
+        CMP #EntityType::UpButton
+        BEQ ProcessUpButtonJump
+        CMP #EntityType::DownButton
+        BEQ ProcessDownButtonJump
+        CMP #EntityType::LeftButton
+        BEQ ProcessLeftButtonJump
+        CMP #EntityType::RightButton
+        BEQ ProcessRightJump
+        CMP #EntityType::AButton
+        BEQ ProcessAButtonJump
+        CMP #EntityType::BButton
+        BEQ ProcessBButtonJump
         JMP SkipEntity
 
+    ProcessPlayerJump:
+        JMP ProcessPlayer
+    ProcessNoteJump:
+        JMP ProcessNote
+    ProcessFireJump:
+        JMP ProcessFire
+    ProcessPlayerTwoJump:
+        JMP ProcessPlayerTwo
+ProcessEurydiceJump:
+        JMP ProcessEurydice
+ProcessNoteStaticJump:
+        JMP ProcessNoteStatic
+ProcessUpButtonJump:
+        JMP ProcessUpButton
+ProcessDownButtonJump:
+        JMP ProcessDownButton
+ProcessLeftButtonJump:
+        JMP ProcessLeftButton
+ProcessRightJump:
+        JMP ProcessRightButton
+ProcessAButtonJump:
+        JMP ProcessAButton
+ProcessBButtonJump:
+        JMP ProcessBButton
+
+
+
+
+
+
+
+
     ProcessPlayer:
-        JSR XMovement
+        JMP EntityComplete
+
+    ProcessUpButton:
+        JMP EntityComplete
+
+    ProcessDownButton:
+        JMP EntityComplete
+
+    ProcessLeftButton:
+        JMP EntityComplete
+
+    ProcessRightButton:
+        JMP EntityComplete
+
+    ProcessAButton:
+        JMP EntityComplete
+
+    ProcessBButton:
         JMP EntityComplete
 
     ProcessNote:
@@ -1350,7 +1463,8 @@ ProcessEntities: ; TODO at some point there are going to be too many entity beha
         JMP EntityComplete
 
         ProcessEurydiceLeft:
-            LDA entities+Entity::xpos 
+            LDA entities+Entity::xpos
+            CLC 
             ADC #$18
             STA entities+Entity::xpos, X
             LDA entities+Entity::ypos
@@ -1360,6 +1474,10 @@ ProcessEntities: ; TODO at some point there are going to be too many entity beha
             JMP EntityComplete
 
     ProcessNoteStatic:
+        LDA entities+Entity::xpos, X
+        CLC 
+        ADC #$00
+        STA entities+Entity::xpos, X
         JMP EntityComplete
 
     ClearEntity:
@@ -1381,7 +1499,7 @@ ProcessEntities: ; TODO at some point there are going to be too many entity beha
     CLC 
     ADC #.sizeof(Entity)
     TAX 
-    CMP #$1E   ; Max entities?
+    CMP #$46   ; Max entities?
     BEQ :+
     JMP ProcessEntitiesLoop
     :
@@ -1468,6 +1586,11 @@ RTS
         LDA entities+Entity::xpos
         SEC 
         SBC ScrollBoundary
+        PHA 
+        CLC 
+        ADC ScrollXEight
+        STA ScrollXEight
+        PLA 
         CLC
         ADC ScrollX  
         STA ScrollX
@@ -1484,12 +1607,16 @@ RTS
     RTS
 
     CheckRightDraw:
-        LDA ScrollX
-        AND #%00000111
-        BEQ DrawRightColumn
+        LDA ScrollXEight
+        CMP #$08
+        BCS DrawRightColumn
         RTS
         DrawRightColumn: ; divide by 8 for each tile
             ; Inrecent the column number. If it hits the limit wrap around 
+            LDA ScrollXEight
+            SEC 
+            SBC #$08
+            STA ScrollXEight
 
             LDA columnnumber
             CLC 
@@ -1524,13 +1651,15 @@ RTS
         RTS
 
     DoLeftScroll:
-        LDA ScrollBoundaryLeft
+        LDA entities+Entity::xpos 
         SEC  
-        SBC entities+Entity::xpos
-        STA temp
-        LDA ScrollX
+        SBC ScrollBoundaryLeft
+        PHA 
         SEC
-        SBC temp  
+        SBC ScrollXEight
+        PLA 
+        SEC 
+        SBC ScrollX
         STA ScrollX
         BCS MovePlayerForward
         LDA currenttable
@@ -1544,15 +1673,18 @@ RTS
     RTS
 
     CheckLeftDraw:
-        LDA ScrollX
-        AND #%00000111
-        BEQ DrawLeftColumn
+        LDA ScrollXEight
+        CMP #$00
+        BMI DrawLeftColumn
         RTS 
         DrawLeftColumn:
+            LDA ScrollXEight
+            CLC 
+            ADC #$08 
+            STA ScrollXEight
+
             DEC columnnumber
             LDA columnnumber
-            ;SEC 
-            ;SBC #$01
             AND #%00011111
             STA columnnumber
             BNE :+
@@ -1856,42 +1988,44 @@ XMovement:
     BEQ EndXMovement
 
     BIT dxhigh
-    BPL LimitDXP   ; If its positive, branch
+    BMI LimitXLeft 
 
-    LimitDXN:
-        JSR FrictionN
+
+    LimitXRight:
+        JSR ApplyFriction
         LDA dxhigh
-        CMP #$FF 
-        BCS AddDX
-        CMP #$00
-        BEQ AddDX
-        LDA #$FF
-        STA dxhigh
-        LDA #$00
-        STA dxlow
-        JMP AddDX
-    LimitDXP:
-        JSR FrictionP
-        LDA dxhigh
-        CMP #$02
-        BCC AddDX
+        CMP #$02 
+        BCC :+
         LDA #$02
         STA dxhigh
         LDA #$00
         STA dxlow
+        :
+        JMP AddDx
+    
+    LimitXLeft:
+        JSR ApplyFriction
+        LDA dxhigh
+        CMP #$FE 
+        BCS :+
+        LDA #$FE 
+        STA dxhigh
+        LDA #$00
+        STA dxlow
+        :
 
-
-    AddDX:
-    LDA entities+Entity::xposlow
-    CLC 
-    ADC dxlow 
-    STA entities+Entity::xposlow
-    LDA entities+Entity::xpos
-    ADC dxhigh
-    STA entities+Entity::xpos
+    AddDx:
+        LDA entities+Entity::xpos
+        CLC 
+        ADC dxhigh
+        STA entities+Entity::xpos 
  
 EndXMovement:
 RTS
+
+ApplyFriction:
+    BIT dxhigh 
+    BMI FrictionP
 
 FrictionN:
     LDA dxlow
@@ -2091,6 +2225,18 @@ OAMBuffer:
         BEQ DrawEurydiceJump
         CMP #EntityType::NoteStatic
         BEQ DrawNoteStaticJump
+        CMP #EntityType::UpButton
+        BEQ DrawUpButtonJump
+        CMP #EntityType::DownButton
+        BEQ DrawDownButtonJump
+        CMP #EntityType::LeftButton
+        BEQ DrawLeftButtonJump
+        CMP #EntityType::RightButton
+        BEQ DrawRightButtonJump
+        CMP #EntityType::AButton
+        BEQ DrawAButtonJump
+        CMP #EntityType::BButton
+        BEQ DrawBButtonJump
         JMP EndSpriteDraw
 
 
@@ -2109,6 +2255,18 @@ OAMBuffer:
         JMP DrawEurydice
     DrawNoteStaticJump:
         JMP DrawNote
+    DrawUpButtonJump:
+        JMP DrawUp
+    DrawDownButtonJump:
+        JMP DrawDown
+    DrawLeftButtonJump:
+        JMP DrawLeft
+    DrawRightButtonJump:
+        JMP DrawRight
+    DrawAButtonJump:
+        JMP DrawA
+    DrawBButtonJump:
+        JMP DrawB
     ;;;;   
 
     DrawPlayer:
@@ -2446,6 +2604,96 @@ DrawPlayerTwo: ; this is a pallete swap p1 but currently isn't spawned
 
         JMP CheckEndSpriteDraw    
 
+    DrawUp:
+        LDA entities+Entity::ypos, X 
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::spriteno, X
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::palette, X
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::xpos, X
+        STA SpriteBuffer, Y 
+        INY 
+        JMP CheckEndSpriteDraw
+
+    DrawDown:
+        LDA entities+Entity::ypos, X 
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::spriteno, X
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::palette, X
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::xpos, X
+        STA SpriteBuffer, Y 
+        INY 
+        JMP CheckEndSpriteDraw
+
+    DrawLeft:
+        LDA entities+Entity::ypos, X 
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::spriteno, X
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::palette, X
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::xpos, X
+        STA SpriteBuffer, Y 
+        INY 
+        JMP CheckEndSpriteDraw
+
+    DrawRight:
+        LDA entities+Entity::ypos, X 
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::spriteno, X
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::palette, X
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::xpos, X
+        STA SpriteBuffer, Y 
+        INY 
+        JMP CheckEndSpriteDraw
+    
+    DrawA:
+        LDA entities+Entity::ypos, X 
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::spriteno, X
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::palette, X
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::xpos, X
+        STA SpriteBuffer, Y 
+        INY 
+        JMP CheckEndSpriteDraw
+    
+    DrawB:
+        LDA entities+Entity::ypos, X 
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::spriteno, X
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::palette, X
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::xpos, X
+        STA SpriteBuffer, Y 
+        INY 
+        JMP CheckEndSpriteDraw
+    
     CheckEndSpriteDraw:
         TXA 
         CLC 
@@ -2457,6 +2705,118 @@ DrawPlayerTwo: ; this is a pallete swap p1 but currently isn't spawned
 
     EndSpriteDraw:
         RTS 
+
+;;;;;;;;;;;;;;;;;;;;;
+; AUDIO ENGINE 
+;;;;;;;;;;;;;;;;;
+
+SoundInit:
+    LDA #$0F 
+    STA $4015 
+
+    LDA #$30 
+    STA $4000
+    STA $4004
+    STA $400C
+    LDA #$80
+    STA 4008
+
+    LDA #$00
+    STA sounddisableflag
+    STA sfxplaying
+    STA sfxindex
+    STA soundframecount
+RTS 
+
+SoundDisable: 
+    LDA #$00 
+    STA $4015 
+    LDA #$01 
+    STA sounddisableflag
+RTS 
+
+SoundLoad:
+    LDA #$01 
+    STA sfxplaying
+    LDA #$00
+    STA sfxindex
+    STA soundframecount
+RTS
+
+SoundPlayFrame:
+    LDA sounddisableflag
+    BNE EndSoundPlayFrame
+
+    LDA sfxplaying
+    BEQ EndSoundPlayFrame
+
+    INC soundframecount
+    LDA soundframecount
+    CMP #$08 
+    BNE EndSoundPlayFrame
+
+    LDY sfxindex
+    LDA SoundData, Y
+
+    CMP #$FF 
+    BNE FindNoteValue
+    LDA #$30
+    STA $4000
+    LDA #$00
+    STA sfxplaying
+    STA soundframecount
+    RTS
+
+    FindNoteValue:
+    ASL 
+    TAY 
+
+    LDA NoteTable, Y 
+    STA $4002 
+    LDA NoteTable+1, Y 
+    STA $4003 
+    LDA #$7F
+    STA $4000
+    LDA #$08 
+    STA $4001 
+    
+    INC sfxindex 
+    LDA #$00 
+    STA soundframecount
+
+    EndSoundPlayFrame:
+RTS 
+; This takes 1 byte as an argument. The 5 lowest bits activate one instrument each
+EnableAPU:
+    STA $4015
+    RTS 
+
+SetSquareOne:
+    LDA #%10111111 
+    STA $4000
+
+    LDA #$C9 
+    STA $4002 
+    LDA #$00
+    STA $4003
+RTS
+
+SetSquareTwo:
+    LDA #%00111000 
+    STA $4004
+
+    LDA #$A9 
+    STA $4006 
+    LDA #$00
+    STA $4007
+RTS
+
+SetTriangle:
+    LDA #$42
+    STA $400A
+    LDA #$00
+    STA $400B
+RTS
 
 ;;;;;;;;;;;;;;;;;;;;
 ; Tilebuffer
@@ -2581,11 +2941,14 @@ BackGroundPaletteBlack:
 AttributeData: 
     .byte %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
 
+SoundData: 
+    .byte $00, $01, $03, $04, $05, $06, $07, $08, $09, $0A, $0B, $0C, $0D, $0E, $0F 
+
 ;Todo: Compression of worldata
 
 WorldMap: ; read into this index to get screendata and when not to scroll further
     .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF 
-    .byte $FF, $00, $01, $02, $FF, $04, $05, $FF
+    .byte $FF, $00, $01, $02, $03, $04, $05, $FF
     .byte $FF, $06, $07, $08, $09, $0A, $0B, $FF
     .byte $FF, $0C, $0D, $0E, $0F, $10, $11, $FF
     .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
@@ -2596,19 +2959,19 @@ WorldData: ; Each row is 32
 
     .byte $2E,$2F,$31,$2E,$2F,$31,$2E,$2F,$31,$2E,$2F,$31,$2E,$2F,$31,$2E,$2F,$31,$2E,$2F,$31,$2E,$2F,$31,$2E,$2F,$31,$2E,$2F,$31,$2E,$2F
     .byte $33,$24,$24,$24,$24,$24,$24,$24,$3B,$3C,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$3B,$3C,$24,$24,$24,$24,$24,$24,$24,$24
-    .byte $34,$24,$24,$24,$24,$0E,$1D,$1A,$3D,$3E,$12,$13,$10,$24,$24,$24,$24,$24,$24,$24,$24,$24,$3D,$3E,$24,$24,$24,$24,$24,$24,$24,$24   
+    .byte $34,$24,$24,$24,$24,$24,$24,$24,$3D,$3E,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$3D,$3E,$24,$24,$24,$24,$24,$24,$24,$24   
     .byte $33,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24  
-    .byte $34,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$13,$0A,$12,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $34,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$0E,$1D,$1A,$1D,$0D,$12,$13,$10,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
 
     .byte $33,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24 
-    .byte $34,$20,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$18,$1A,$1F,$0E,$1D,$1B,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $34,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
     .byte $33,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
     .byte $34,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
 
-    .byte $33,$24,$20,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $33,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
     .byte $34,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
-    .byte $33,$20,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
-    .byte $34,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$46,$46,$46,$46,$46,$46,$46,$46,$46,$46,$46,$46,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $33,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $34,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
 
     .byte $33,$24,$24,$24,$24,$24,$24,$24,$43,$44,$24,$24,$47,$47,$47,$47,$47,$47,$47,$47,$24,$24,$43,$44,$24,$24,$24,$24,$24,$24,$24,$24
     .byte $34,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$4B,$26,$26,$26,$26,$26,$26,$26,$26,$4C,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
@@ -2622,7 +2985,7 @@ WorldData: ; Each row is 32
 
     .byte $33,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$4B,$27,$27,$27,$27,$27,$27,$27,$27,$4C,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24
     .byte $34,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$4B,$4D,$4D,$4D,$4D,$4D,$4D,$4D,$4D,$4C,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24
-    .byte $33,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$3F,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24
+    .byte $33,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24
 
     .byte $34,$24,$43,$44,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$43,$44,$24,$24
     .byte $37,$38,$37,$38,$37,$38,$37,$37,$37,$38,$37,$38,$37,$38,$37,$38,$37,$38,$37,$38,$37,$38,$37,$38,$37,$38,$37,$38,$37,$38,$37,$38
@@ -2738,7 +3101,28 @@ TileMap: ;1= solid
     .byte $01,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$01
     .byte $01,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$01
     .byte $01,$01,$00,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01
+
+NoteTable:  
+    .word                                                                $07F1, $0780, $0713
     
+    .word $06AD, $064D, $05F3, $059D, $054D, $0500, $04B8, $0475, $0435, $03F8, $03BF, $0389  
+
+    .word $0356, $0326, $0259, $02CE, $02A6, $027F, $025C, $023A, $021A, $03F8, $01DF, $0389
+
+    .word $01AB, $0193, $017C, $0167, $0151, $013F, $012D, $011C, $010C, $00FD, $00EF, $0389
+
+    .word $00D2, $00C9, $00BD, $00B3, $00A9, $009F, $0096, $008E, $0086, $007E, $0077, $0070
+
+    .word $006A, $0064, $005E, $0059, $0054, $004F, $004B, $0046, $0042, $003F, $003B, $0038
+
+    .word $0034, $0031, $002F, $002C, $0029, $0027, $0025, $0023, $0021, $001F, $001B, $001B
+
+    .word $001A, $0018, $0017, $0015, $0014, $0013, $0012, $0011, $0010, $000F, $000E, $000D
+
+    .word $000C, $000C, $000B, $000A, $000A, $0009, $0008
+
+
+
 .segment "VECTORS"      ; This part just defines what labels to go to whenever the nmi or reset is called 
     .word NMI           ; If you look at someone elses stuff they probably call this vblank or something
     .word Reset
