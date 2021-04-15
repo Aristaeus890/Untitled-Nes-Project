@@ -35,6 +35,167 @@
     Title = 2
 .endscope
 
+.scope ChannelConst
+    SquareOne = $00
+    SquareTwo = $01 
+    Triangle = $02 
+    Noise = $03 
+.endscope
+
+.scope Stream
+    MusicSquareOne = 0
+    MusicSquareTwo = 1
+    MusicTriangle = 2
+    MusicNoise = 3 
+    SfxOne = 4
+    SfxTwo = 5
+.endscope
+
+.scope Octave
+    A1 = $00
+    AS1 = $01
+    BB1 = $01
+    B1 = $02
+
+    C2 = $03
+    CS2 = $04
+    DB2 = $04 
+    D2 = $05
+    DS2 = $06
+    EB2 = $06 
+    E2 = $07
+    F2 = $08
+    FS2 = $09
+    GB2 = $09
+    G2 = $0A
+    GS2 = $0B
+    AB2 = $0B 
+    A2 = $0C 
+    AS2 = $0D 
+    BB2 = $0D 
+    B2 = $0E
+
+    C3 = $0F
+    CS3 = $10
+    DB3 = $10 
+    D3 = $11
+    DS3 = $12
+    EB3 = $12 
+    E3 = $13
+    F3 = $14
+    FS3 = $15
+    GB3 = $15
+    G3 = $16
+    GS3 = $17
+    AB3 = $17 
+    A3 = $18
+    AS3 = $19 
+    BB3 = $19 
+    B3 = $1A
+
+    C4 = $1B
+    CS4 = $1C
+    DB4 = $1C 
+    D4 = $1D
+    DS4 = $1E
+    EB4 = $1E 
+    E4 = $1F
+    F4 = $20
+    FS4 = $21
+    GB4 = $21
+    G4 = $22
+    GS4 = $23
+    AB4 = $23 
+    A4 = $24 
+    AS4 = $25 
+    BB4 = $25 
+    B4 = $26
+
+    C5 = $27
+    CS5 = $28
+    DB5 = $28 
+    D5 = $29
+    DS5 = $2A
+    EB5 = $2A 
+    E5 = $2B
+    F5 = $2C
+    FS5 = $2D
+    GB5 = $2D
+    G5 = $2E
+    GS5 = $2F
+    AB5 = $2F 
+    A5 = $30 
+    AS5 = $31 
+    BB5 = $31 
+    B5 = $32
+
+    C6 = $33
+    CS6 = $34
+    DB6 = $34 
+    D6 = $35
+    DS6 = $36
+    EB6 = $36 
+    E6 = $37
+    F6 = $38
+    FS6 = $39
+    GB6 = $39
+    G6 = $3A
+    GS6 = $3B
+    AB6 = $3B 
+    A6 = $3C 
+    AS6 = $3D 
+    BB6 = $3D 
+    B6 = $3E
+
+    C7 = $3F
+    CS7 = $40
+    DB7 = $40 
+    D7 = $41
+    DS7 = $42
+    EB7 = $42 
+    E7 = $43
+    F7 = $44
+    FS7 = $45
+    GB7 = $45
+    G7 = $46
+    GS7 = $47
+    AB7 = $47 
+    A7 = $48 
+    AS7 = $49 
+    BB7 = $49 
+    B7 = $4A
+
+    C8 = $4B
+    CS8 = $4C
+    DB8 = $4C 
+    D8 = $4D
+    DS8 = $4E
+    EB8 = $4E 
+    E8 = $4F
+    F8 = $50
+    FS8 = $51
+    GB8 = $51
+    G8 = $52
+    GS8 = $53
+    AB8 = $53 
+    A8 = $54 
+    AS8 = $55 
+    BB8 = $55 
+    B8 = $56
+
+    C9 = $57
+    CS9 = $58
+    DB9 = $58 
+    D9 = $59
+    DS9 = $5A
+    EB9 = $5A 
+    E9 = $5B
+    F9 = $5C
+    FS9 = $5D
+    GB9 = $5D
+    
+.endscope
+
 .scope MapTileNo
     MapZero = 0
     MapOne = 1
@@ -123,6 +284,17 @@
     soundframecount: .res 1
     sfxplaying: .res 1
     sfxindex: .res 1
+    streamcurrentsound: .res 6
+    streamstatus: .res 6
+    streamchannel: .res 6
+    streampointerlow: .res 6
+    streampointerhigh: .res 6  
+    streamvolduty: .res 6
+    streamnotelow: .res 6
+    streamnotehigh: .res 6
+    soundpointer: .res 2
+    soundtemp1: .res 1
+    soundtemp2: .res 1
 ;; This tells the nes what to do when it starts up
 ;; We basically disable most things initially and initialise some others
 
@@ -439,6 +611,7 @@ STA pageX
 
 ; Enable the apu
 JSR SoundInit
+LDA #$00
 JSR SoundLoad
 
 JSR ChangePalleteBlack
@@ -517,7 +690,7 @@ MAINLOOP:
     LDA #%00111110
     STA $2001
     JSR SoundPlayFrame
-    INC nmidone
+    INC nmidone 
 
     PLA
     TAY 
@@ -2736,87 +2909,154 @@ SoundDisable:
 RTS 
 
 SoundLoad:
-    LDA #$01 
-    STA sfxplaying
-    LDA #$00
-    STA sfxindex
-    STA soundframecount
+    STA soundtemp1
+    ASL 
+    TAY 
+    LDA SongHeaders, Y 
+    STA soundpointer
+    LDA SongHeaders+1
+    STA soundpointer+1 
+
+    LDY #$00 
+    LDA (soundpointer), Y 
+    STA soundtemp2 
+    INY 
+
+    SoundLoadLoop: 
+        LDA (soundpointer), Y 
+        TAX 
+        INY 
+
+        LDA (soundpointer), Y 
+        STA streamstatus, X 
+        BEQ SoundNextStream
+        INY 
+
+        LDA (soundpointer), Y 
+        STA streamchannel, X 
+        INY 
+
+        LDA (soundpointer), Y 
+        STA streamvolduty, X 
+        INY
+
+        LDA (soundpointer), Y 
+        STA streampointerlow, X 
+        INY
+
+        LDA (soundpointer), Y 
+        STA streampointerhigh, X 
+        
+    SoundNextStream:
+        INY 
+        LDA soundtemp1 
+        STA streamcurrentsound, X 
+        DEC soundtemp2 
+        BNE SoundLoadLoop 
 RTS
 
 SoundPlayFrame:
     LDA sounddisableflag
     BNE EndSoundPlayFrame
 
-    LDA sfxplaying
-    BEQ EndSoundPlayFrame
-
     INC soundframecount
     LDA soundframecount
-    CMP #$08 
+    CMP #$0C 
     BNE EndSoundPlayFrame
 
-    LDY sfxindex
-    LDA SoundData, Y
+    JSR SoundSilence
 
-    CMP #$FF 
-    BNE FindNoteValue
-    LDA #$30
-    STA $4000
-    LDA #$00
-    STA sfxplaying
-    STA soundframecount
-    RTS
+    SoundPlayFrameLoop: 
+        LDA streamstatus, X 
+        AND #$01 
+        BEQ EndSoundPlayFrameLoop
+        JSR SoundGetByte
+        JSR SoundSetAPU 
 
-    FindNoteValue:
-    ASL 
-    TAY 
-
-    LDA NoteTable, Y 
-    STA $4002 
-    LDA NoteTable+1, Y 
-    STA $4003 
-    LDA #$7F
-    STA $4000
-    LDA #$08 
-    STA $4001 
-    
-    INC sfxindex 
-    LDA #$00 
-    STA soundframecount
-
+        LDA #$00
+        STA soundframecount
+    EndSoundPlayFrameLoop:
+        INX 
+        CPX #$06 
+        BNE SoundPlayFrameLoop
     EndSoundPlayFrame:
 RTS 
-; This takes 1 byte as an argument. The 5 lowest bits activate one instrument each
-EnableAPU:
-    STA $4015
-    RTS 
 
-SetSquareOne:
-    LDA #%10111111 
-    STA $4000
+SoundGetByte:
+    LDA streampointerlow, X 
+    STA soundpointer
+    LDA streampointerhigh, X 
+    STA soundpointer+1 
 
-    LDA #$C9 
-    STA $4002 
-    LDA #$00
-    STA $4003
-RTS
+    LDY #$00 
+    LDA (soundpointer), Y 
+    BPL SoundDoNote
+    CMP #$A0 
+    BCC SoundDoNoteLength
 
-SetSquareTwo:
-    LDA #%00111000 
-    STA $4004
+SoundDoOpcode:
+    CMP #$FF 
+    BNE EndSoundGetByte
+    LDA streamstatus, X 
+    AND #%11111110
+    STA streamstatus, X 
 
-    LDA #$A9 
-    STA $4006 
-    LDA #$00
-    STA $4007
-RTS
+    LDA streamchannel, X 
+    CMP #ChannelConst::Triangle 
+    BEQ SoundSilenceTriangle
+    LDA #$30 
+    BNE SoundSilence 
 
-SetTriangle:
-    LDA #$42
-    STA $400A
-    LDA #$00
-    STA $400B
-RTS
+SoundSilenceTriangle:
+    LDA #$80 
+SoundSilence:
+    STA streamvolduty, X 
+    JMP SoundUpdatePointer
+SoundDoNoteLength: 
+    JMP SoundUpdatePointer
+SoundDoNote: 
+    STY soundtemp1 
+    ASL 
+    TAY 
+    LDA NoteTable, Y 
+    STA streamnotelow, X 
+    LDA NoteTable+1, Y 
+    STA streamnotehigh, X 
+SoundUpdatePointer:
+    INY 
+    TYA 
+    CLC 
+    ADC streampointerlow, X 
+    STA streampointerlow, X 
+    BCC EndSoundGetByte
+    INC streampointerhigh, X 
+EndSoundGetByte:
+RTS 
+
+SoundSetAPU: 
+    LDA streamchannel, X 
+    ASL 
+    ASL 
+    TAY 
+    LDA streamvolduty, X 
+    STA $4000, Y 
+    LDA streamnotelow, X 
+    STA $4002, Y 
+    LDA streamnotehigh, X
+    STA $4003, Y 
+
+    LDA streamchannel, X 
+    CMP #ChannelConst::Triangle
+    BCS EndSoundSetAPU 
+    LDA #$08 
+    STA $4001, Y 
+EndSoundSetAPU:
+RTS 
+
+SongHeaders:
+    ;.word song0header
+    .word song1header
+
 
 ;;;;;;;;;;;;;;;;;;;;
 ; Tilebuffer
@@ -3104,24 +3344,61 @@ TileMap: ;1= solid
 
 NoteTable:  
     .word                                                                $07F1, $0780, $0713
-    
+    ; A1-B1
     .word $06AD, $064D, $05F3, $059D, $054D, $0500, $04B8, $0475, $0435, $03F8, $03BF, $0389  
-
+    ; C2-B2
     .word $0356, $0326, $0259, $02CE, $02A6, $027F, $025C, $023A, $021A, $03F8, $01DF, $0389
-
+    ; C3-B3
     .word $01AB, $0193, $017C, $0167, $0151, $013F, $012D, $011C, $010C, $00FD, $00EF, $0389
-
+    ; C4-B4
     .word $00D2, $00C9, $00BD, $00B3, $00A9, $009F, $0096, $008E, $0086, $007E, $0077, $0070
-
+    ; C5-B5
     .word $006A, $0064, $005E, $0059, $0054, $004F, $004B, $0046, $0042, $003F, $003B, $0038
-
+    ; C6-B6
     .word $0034, $0031, $002F, $002C, $0029, $0027, $0025, $0023, $0021, $001F, $001B, $001B
-
+    ; C7-B7
     .word $001A, $0018, $0017, $0015, $0014, $0013, $0012, $0011, $0010, $000F, $000E, $000D
-
+    ; C8-B8
     .word $000C, $000C, $000B, $000A, $000A, $0009, $0008
 
+song1header:
+    .byte $04 
 
+    .byte Stream::MusicSquareOne 
+    .byte $01 
+    .byte ChannelConst::SquareOne
+    .byte $77 
+    .word song1square1
+
+    .byte Stream::MusicSquareTwo 
+    .byte $01 
+    .byte ChannelConst::SquareTwo
+    .byte $B7 
+    .word song1square2
+
+    .byte Stream::MusicTriangle 
+    .byte $01 
+    .byte ChannelConst::Triangle
+    .byte $81 
+    .word song1triangle
+
+    .byte Stream::MusicNoise
+    .byte $00
+
+song1square1:
+    .byte Octave::B2, Octave::D3, Octave::F3, Octave::GS3, Octave::B3, Octave::D4, Octave::F4, Octave::GS4, Octave::B4, Octave::D5, Octave::F5, Octave::GS5, Octave::B5, Octave::D6, Octave::F6, Octave::GS6
+    .byte Octave::BB2, Octave::DB3, Octave::E3, Octave::G3, Octave::BB3, Octave::DB4, Octave::E4, Octave::G4, Octave::BB4, Octave::DB5, Octave::E5, Octave::G5, Octave::BB5, Octave::DB6, Octave::E6, Octave::G6 
+    .byte $FF 
+
+song1square2:
+    .byte Octave::GS5, Octave::F5, Octave::D5, Octave::GS5, Octave::F5, Octave::D5, Octave::B4, Octave::F5, Octave::D5, Octave::B4, Octave::GS4, Octave::D5, Octave::B4, Octave::GS4, Octave::F4, Octave::B4 
+    .byte Octave::G5, Octave::E5, Octave::DB5, Octave::G5, Octave::E5, Octave::DB5, Octave::BB4, Octave::E5, Octave::DB5, Octave::BB4, Octave::G4, Octave::DB5, Octave::BB4, Octave::G4, Octave::E4, Octave::BB4 
+    .byte $FF 
+
+song1triangle:
+    .byte Octave::F6, Octave::D6, Octave::B5, Octave::D6, Octave::B5, Octave::GS5, Octave::B5, Octave::GS5, Octave::F5, Octave::GS5, Octave::F5, Octave::D5, Octave::F5, Octave::D5, Octave::B4, Octave::GS4
+    .byte Octave::E6, Octave::DB6, Octave::BB5, Octave::DB6, Octave::BB5, Octave::G5, Octave::BB5, Octave::G5, Octave::E5, Octave::G5, Octave::E5, Octave::DB5, Octave::E5, Octave::DB5, Octave::BB4, Octave::G4 
+    .byte $FF
 
 .segment "VECTORS"      ; This part just defines what labels to go to whenever the nmi or reset is called 
     .word NMI           ; If you look at someone elses stuff they probably call this vblank or something
