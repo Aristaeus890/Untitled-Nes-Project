@@ -2914,7 +2914,7 @@ SoundLoad:
     TAY 
     LDA SongHeaders, Y 
     STA soundpointer
-    LDA SongHeaders+1
+    LDA SongHeaders+1, Y 
     STA soundpointer+1 
 
     LDY #$00 
@@ -2966,6 +2966,7 @@ SoundPlayFrame:
 
     JSR SoundSilence
 
+    LDX #$00
     SoundPlayFrameLoop: 
         LDA streamstatus, X 
         AND #$01 
@@ -2979,6 +2980,9 @@ SoundPlayFrame:
         INX 
         CPX #$06 
         BNE SoundPlayFrameLoop
+
+        LDA #$00 
+        STA soundframecount
     EndSoundPlayFrame:
 RTS 
 
@@ -3022,6 +3026,7 @@ SoundDoNote:
     STA streamnotelow, X 
     LDA NoteTable+1, Y 
     STA streamnotehigh, X 
+    LDY soundtemp1
 SoundUpdatePointer:
     INY 
     TYA 
