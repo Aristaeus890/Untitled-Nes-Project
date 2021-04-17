@@ -193,8 +193,24 @@
     F9 = $5C
     FS9 = $5D
     GB9 = $5D
+
+    rest = $5E
     
 .endscope
+
+.scope NoteLength 
+    thirtysecond = $80
+    sixteenth = $81
+    eighth = $82
+    quarter = $83
+    half = $84
+    whole = $85
+    d_sixteenth = $86
+    d_eighth = $87
+    d_quarter = $88
+    d_half = $89
+    d_whole = $8A
+.endscope 
 
 .scope MapTileNo
     MapZero = 0
@@ -284,17 +300,23 @@
     soundframecount: .res 1
     sfxplaying: .res 1
     sfxindex: .res 1
-    streamcurrentsound: .res 6
-    streamstatus: .res 6
-    streamchannel: .res 6
-    streampointerlow: .res 6
-    streampointerhigh: .res 6  
-    streamvolduty: .res 6
-    streamnotelow: .res 6
-    streamnotehigh: .res 6
+;    streamcurrentsound: .res 6
+;    streamstatus: .res 6
+;    streamchannel: .res 6
+;    streampointerlow: .res 6
+;    streampointerhigh: .res 6  
+;    streamvolduty: .res 6
+;    streamnotelow: .res 6
+;    streamnotehigh: .res 6
+;    streamtempo: .res 6 
+;    streamtickertotal: .res 6
+;    streamnotelengthcount: .res 6 
+;    streamnotelength: .res 6
     soundpointer: .res 2
     soundtemp1: .res 1
     soundtemp2: .res 1
+    soundsquare1old: .res 1
+    soundsquare2old: .res 1
 ;; This tells the nes what to do when it starts up
 ;; We basically disable most things initially and initialise some others
 
@@ -577,7 +599,21 @@ SetPlayerPos: ; initial player position
 SpriteBuffer = $0200 ;$0200 -> $02FF
 TileBuffer = $0300 ; $0300 -> 031F
 PaletteBuffer = $0320 ; 03320 ->033F 
-NoteInputMem = $0340 ; 0340 -> 0343
+ApuBuffer = $0340 ; 0340 -> 034F
+streamcurrentsound = $0350 ; 0350 -> 0355
+streamstatus = $0356 ; 0356 -> 035B 
+streamchannel = $035C ; 035C -> 0361
+streampointerlow = $0362 ; 0362 -> 0367
+streampointerhigh = $0368 ; 0368 -> 036D
+streamvolduty  = $036E ; 036E -> 0373
+streamnotelow = $0374 ; 0374 -> 0379 
+streamnotehigh = $037A ; 037A -> 037F
+streamtempo = $0380 ; -> 0385
+streamtickertotal = $0386 ; -> 038B
+streamnotelengthcount = $038C ; -> 0391
+streamnotelength = $0392 ; -> 0397
+NoteInputMem = $0398 ; 0350 -> 0343
+
 AudioMem = $0400
 
 FillTileBuffer:
@@ -611,7 +647,7 @@ STA pageX
 
 ; Enable the apu
 JSR SoundInit
-LDA #$00
+LDA #$01
 JSR SoundLoad
 
 JSR ChangePalleteBlack
@@ -2887,12 +2923,19 @@ SoundInit:
     LDA #$0F 
     STA $4015 
 
+    LDA #$00 
+    STA sounddisableflag
+
+    LDA #$FF 
+    STA soundsquare1old
+    STA soundsquare2old
+
     LDA #$30 
-    STA $4000
-    STA $4004
-    STA $400C
+    STA ApuBuffer
+    STA ApuBuffer+4
+    STA ApuBuffer+12
     LDA #$80
-    STA 4008
+    STA ApuBuffer+8
 
     LDA #$00
     STA sounddisableflag
@@ -2947,6 +2990,12 @@ SoundLoad:
         LDA (soundpointer), Y 
         STA streampointerhigh, X 
         
+        LDA #$A0 
+        STA streamtickertotal
+
+        LDA #$01 
+        STA streamnotelengthcount, X 
+
     SoundNextStream:
         INY 
         LDA soundtemp1 
@@ -2959,30 +3008,36 @@ SoundPlayFrame:
     LDA sounddisableflag
     BNE EndSoundPlayFrame
 
-    INC soundframecount
-    LDA soundframecount
-    CMP #$0C 
-    BNE EndSoundPlayFrame
-
     JSR SoundSilence
 
     LDX #$00
     SoundPlayFrameLoop: 
         LDA streamstatus, X 
-        AND #$01 
+        AND #$01
         BEQ EndSoundPlayFrameLoop
-        JSR SoundGetByte
-        JSR SoundSetAPU 
 
-        LDA #$00
-        STA soundframecount
+        LDA streamtickertotal, X 
+        CLC 
+        ADC streamtempo, X 
+        STA streamtickertotal, X 
+        BCC SoundSetBuffer
+
+        DEC streamnotelengthcount, X 
+        BNE SoundSetBuffer 
+        LDA streamnotelength, X 
+        STA streamnotelengthcount, X 
+
+        JSR SoundGetByte
+
+    SoundSetBuffer: 
+        JSR SoundWriteBufferToAPU
+
     EndSoundPlayFrameLoop:
         INX 
         CPX #$06 
         BNE SoundPlayFrameLoop
 
-        LDA #$00 
-        STA soundframecount
+        JSR SoundSetAPU
     EndSoundPlayFrame:
 RTS 
 
@@ -2992,7 +3047,8 @@ SoundGetByte:
     LDA streampointerhigh, X 
     STA soundpointer+1 
 
-    LDY #$00 
+    LDY #$00
+    SoundDoFetch: 
     LDA (soundpointer), Y 
     BPL SoundDoNote
     CMP #$A0 
@@ -3017,7 +3073,15 @@ SoundSilence:
     STA streamvolduty, X 
     JMP SoundUpdatePointer
 SoundDoNoteLength: 
-    JMP SoundUpdatePointer
+    AND #%01111111
+    STY soundtemp1 
+    TAY 
+    LDA NoteLengthTable, Y 
+    STA streamnotelength, X 
+    STA streamnotelengthcount, X 
+    LDY soundtemp1 
+    INY 
+    JMP SoundDoFetch
 SoundDoNote: 
     STY soundtemp1 
     ASL 
@@ -3027,6 +3091,7 @@ SoundDoNote:
     LDA NoteTable+1, Y 
     STA streamnotehigh, X 
     LDY soundtemp1
+    JSR SoundCheckRest
 SoundUpdatePointer:
     INY 
     TYA 
@@ -3038,28 +3103,102 @@ SoundUpdatePointer:
 EndSoundGetByte:
 RTS 
 
+SoundCheckRest: 
+    LDA (soundpointer), Y 
+    CMP #Octave::rest 
+    BNE SoundNotRest 
+    LDA streamstatus, X 
+    ORA #%00000010 
+    BNE SoundStoreRest
+
+    SoundNotRest: 
+        LDA streamstatus, X 
+        AND #%11111101 
+    SoundStoreRest: 
+        STA streamstatus, X 
+        RTS 
+
 SoundSetAPU: 
     LDA streamchannel, X 
     ASL 
     ASL 
-    TAY 
+    TAY
+
     LDA streamvolduty, X 
-    STA $4000, Y 
+    STA ApuBuffer, Y
+
+    LDA #$08 
+    STA ApuBuffer+1, Y
+
     LDA streamnotelow, X 
-    STA $4002, Y 
+    STA ApuBuffer+2, Y
+
     LDA streamnotehigh, X
-    STA $4003, Y 
+    STA ApuBuffer+3, Y 
+
+    LDA streamstatus, X 
+    AND #%00000010
+    BEQ EndSoundSetAPU
 
     LDA streamchannel, X 
     CMP #ChannelConst::Triangle
-    BCS EndSoundSetAPU 
-    LDA #$08 
-    STA $4001, Y 
+    BEQ tri  
+    LDA #$30 
+    BNE store 
+
+    tri: 
+        LDA #$80 
+    store: 
+        STA ApuBuffer, Y  
 EndSoundSetAPU:
 RTS 
 
+SoundWriteBufferToAPU: 
+    SoundWriteSquare1Buffer:
+    LDA ApuBuffer
+    STA $4000
+    LDA ApuBuffer+1
+    STA $4001
+    LDA ApuBuffer+2
+    STA $4002
+    LDA ApuBuffer+3
+    CMP soundsquare1old
+    BEQ SoundWriteSquare2Buffer
+    STA $4003
+    STA soundsquare1old
+
+    SoundWriteSquare2Buffer:
+    LDA ApuBuffer+4
+    STA $4004
+    LDA ApuBuffer+5
+    STA $4005
+    LDA ApuBuffer+6
+    STA $4006
+    LDA ApuBuffer+7
+    CMP soundsquare2old
+    BEQ SoundWriteTriangleBuffer
+    STA $4007
+    STA soundsquare2old
+
+    SoundWriteTriangleBuffer:
+    LDA ApuBuffer+8 
+    STA $4008 
+    LDA ApuBuffer+10
+    STA $400A 
+    LDA ApuBuffer+11 
+    STA $400B 
+
+    SoundWriteNoiseBuffer: 
+    LDA ApuBuffer+12 
+    STA $400C 
+    LDA ApuBuffer+14
+    STA $400E 
+    LDA ApuBuffer+15 
+    STA $400F 
+RTS
+
 SongHeaders:
-    ;.word song0header
+    .word song0header
     .word song1header
 
 
@@ -3353,7 +3492,7 @@ NoteTable:
     .word $06AD, $064D, $05F3, $059D, $054D, $0500, $04B8, $0475, $0435, $03F8, $03BF, $0389  
     ; C2-B2
     .word $0356, $0326, $0259, $02CE, $02A6, $027F, $025C, $023A, $021A, $03F8, $01DF, $0389
-    ; C3-B3
+    ; C3-B3   
     .word $01AB, $0193, $017C, $0167, $0151, $013F, $012D, $011C, $010C, $00FD, $00EF, $0389
     ; C4-B4
     .word $00D2, $00C9, $00BD, $00B3, $00A9, $009F, $0096, $008E, $0086, $007E, $0077, $0070
@@ -3366,6 +3505,45 @@ NoteTable:
     ; C8-B8
     .word $000C, $000C, $000B, $000A, $000A, $0009, $0008
 
+NoteLengthTable: 
+    .byte $01 
+    .byte $02 
+    .byte $04
+    .byte $08
+    .byte $10
+    .byte $20
+
+    .byte $03
+    .byte $06
+    .byte $0C 
+    .byte $18 
+    .byte $30
+    .byte $07
+
+
+song0header:
+    .byte $06 
+
+    .byte Stream::MusicSquareOne
+    .byte $00
+
+    .byte Stream::MusicSquareTwo
+    .byte $00
+
+    .byte Stream::MusicTriangle
+    .byte $00
+
+    .byte Stream::MusicNoise
+    .byte $00
+
+    .byte Stream::SfxOne
+    .byte $00
+
+    .byte Stream::SfxTwo
+    .byte $00
+
+
+
 song1header:
     .byte $04 
 
@@ -3374,34 +3552,44 @@ song1header:
     .byte ChannelConst::SquareOne
     .byte $77 
     .word song1square1
+    .byte $40
 
     .byte Stream::MusicSquareTwo 
     .byte $01 
     .byte ChannelConst::SquareTwo
     .byte $B7 
     .word song1square2
+    .byte $40
 
     .byte Stream::MusicTriangle 
     .byte $01 
     .byte ChannelConst::Triangle
     .byte $81 
     .word song1triangle
+    .byte $40
 
     .byte Stream::MusicNoise
     .byte $00
 
+;    .byte Stream::SfxOne
+;    .byte $00
+
+;    .byte Stream::SfxTwo
+;    .byte $00
+
+
 song1square1:
-    .byte Octave::B2, Octave::D3, Octave::F3, Octave::GS3, Octave::B3, Octave::D4, Octave::F4, Octave::GS4, Octave::B4, Octave::D5, Octave::F5, Octave::GS5, Octave::B5, Octave::D6, Octave::F6, Octave::GS6
+    .byte NoteLength::thirtysecond, Octave::B2, Octave::D3, Octave::F3, Octave::GS3, Octave::B3, Octave::D4, Octave::F4, Octave::GS4, Octave::B4, Octave::D5, Octave::F5, Octave::GS5, Octave::B5, Octave::D6, Octave::F6, Octave::GS6
     .byte Octave::BB2, Octave::DB3, Octave::E3, Octave::G3, Octave::BB3, Octave::DB4, Octave::E4, Octave::G4, Octave::BB4, Octave::DB5, Octave::E5, Octave::G5, Octave::BB5, Octave::DB6, Octave::E6, Octave::G6 
     .byte $FF 
 
 song1square2:
-    .byte Octave::GS5, Octave::F5, Octave::D5, Octave::GS5, Octave::F5, Octave::D5, Octave::B4, Octave::F5, Octave::D5, Octave::B4, Octave::GS4, Octave::D5, Octave::B4, Octave::GS4, Octave::F4, Octave::B4 
+    .byte NoteLength::thirtysecond, Octave::GS5, Octave::F5, Octave::D5, Octave::GS5, Octave::F5, Octave::D5, Octave::B4, Octave::F5, Octave::D5, Octave::B4, Octave::GS4, Octave::D5, Octave::B4, Octave::GS4, Octave::F4, Octave::B4 
     .byte Octave::G5, Octave::E5, Octave::DB5, Octave::G5, Octave::E5, Octave::DB5, Octave::BB4, Octave::E5, Octave::DB5, Octave::BB4, Octave::G4, Octave::DB5, Octave::BB4, Octave::G4, Octave::E4, Octave::BB4 
     .byte $FF 
 
 song1triangle:
-    .byte Octave::F6, Octave::D6, Octave::B5, Octave::D6, Octave::B5, Octave::GS5, Octave::B5, Octave::GS5, Octave::F5, Octave::GS5, Octave::F5, Octave::D5, Octave::F5, Octave::D5, Octave::B4, Octave::GS4
+    .byte NoteLength::thirtysecond, Octave::F6, Octave::D6, Octave::B5, Octave::D6, Octave::B5, Octave::GS5, Octave::B5, Octave::GS5, Octave::F5, Octave::GS5, Octave::F5, Octave::D5, Octave::F5, Octave::D5, Octave::B4, Octave::GS4
     .byte Octave::E6, Octave::DB6, Octave::BB5, Octave::DB6, Octave::BB5, Octave::G5, Octave::BB5, Octave::G5, Octave::E5, Octave::G5, Octave::E5, Octave::DB5, Octave::E5, Octave::DB5, Octave::BB4, Octave::G4 
     .byte $FF
 
