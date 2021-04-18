@@ -212,6 +212,12 @@
     d_whole = $8A
 .endscope 
 
+.scope Envelope 
+    staccato = $00 
+    fadein = $01 
+    blipecho = $02
+.endscope 
+
 .scope MapTileNo
     MapZero = 0
     MapOne = 1
@@ -612,6 +618,8 @@ streamtempo = $0380 ; -> 0385
 streamtickertotal = $0386 ; -> 038B
 streamnotelengthcount = $038C ; -> 0391
 streamnotelength = $0392 ; -> 0397
+streamvolumeenvelope = $0398 ; -> 039D
+streamvolumeenvelopeindex = $039E ; -> 03A3
 NoteInputMem = $0398 ; 0350 -> 0343
 
 AudioMem = $0400
@@ -2930,6 +2938,7 @@ SoundInit:
     STA soundsquare1old
     STA soundsquare2old
 
+SoundSilenceInit:
     LDA #$30 
     STA ApuBuffer
     STA ApuBuffer+4
@@ -2937,11 +2946,11 @@ SoundInit:
     LDA #$80
     STA ApuBuffer+8
 
-    LDA #$00
-    STA sounddisableflag
-    STA sfxplaying
-    STA sfxindex
-    STA soundframecount
+    ;LDA #$00
+    ;STA sounddisableflag
+    ;STA sfxplaying
+    ;STA sfxindex
+    ;STA soundframecount
 RTS 
 
 SoundDisable: 
@@ -2984,17 +2993,28 @@ SoundLoad:
         INY
 
         LDA (soundpointer), Y 
+        STA streamvolumeenvelope, X 
+        INY 
+
+        LDA (soundpointer), Y 
         STA streampointerlow, X 
         INY
 
         LDA (soundpointer), Y 
-        STA streampointerhigh, X 
+        STA streampointerhigh, X
+        INY 
+
+        LDA (soundpointer), Y 
+        STA streamtempo, X  
         
         LDA #$A0 
-        STA streamtickertotal
+        STA streamtickertotal, X 
 
         LDA #$01 
         STA streamnotelengthcount, X 
+
+        LDA #$00 
+        STA streamvolumeenvelopeindex, X 
 
     SoundNextStream:
         INY 
@@ -3008,7 +3028,7 @@ SoundPlayFrame:
     LDA sounddisableflag
     BNE EndSoundPlayFrame
 
-    JSR SoundSilence
+    JSR SoundSilenceInit
 
     LDX #$00
     SoundPlayFrameLoop: 
@@ -3030,14 +3050,14 @@ SoundPlayFrame:
         JSR SoundGetByte
 
     SoundSetBuffer: 
-        JSR SoundWriteBufferToAPU
+        JSR SoundSetAPU
 
     EndSoundPlayFrameLoop:
         INX 
         CPX #$06 
         BNE SoundPlayFrameLoop
 
-        JSR SoundSetAPU
+        JSR SoundWriteBufferToAPU
     EndSoundPlayFrame:
 RTS 
 
@@ -3062,7 +3082,7 @@ SoundDoOpcode:
     STA streamstatus, X 
 
     LDA streamchannel, X 
-    CMP #ChannelConst::Triangle 
+    CMP ChannelConst::Triangle 
     BEQ SoundSilenceTriangle
     LDA #$30 
     BNE SoundSilence 
@@ -3091,6 +3111,10 @@ SoundDoNote:
     LDA NoteTable+1, Y 
     STA streamnotehigh, X 
     LDY soundtemp1
+
+    LDA #$00 
+    STA streamvolumeenvelopeindex, X
+
     JSR SoundCheckRest
 SoundUpdatePointer:
     INY 
@@ -3105,7 +3129,7 @@ RTS
 
 SoundCheckRest: 
     LDA (soundpointer), Y 
-    CMP #Octave::rest 
+    CMP Octave::rest 
     BNE SoundNotRest 
     LDA streamstatus, X 
     ORA #%00000010 
@@ -3124,8 +3148,7 @@ SoundSetAPU:
     ASL 
     TAY
 
-    LDA streamvolduty, X 
-    STA ApuBuffer, Y
+    JSR SoundSetStreamVolume 
 
     LDA #$08 
     STA ApuBuffer+1, Y
@@ -3135,13 +3158,56 @@ SoundSetAPU:
 
     LDA streamnotehigh, X
     STA ApuBuffer+3, Y 
+  
+EndSoundSetAPU:
+RTS 
+
+SoundSetStreamVolume: 
+    STY soundtemp1 
+
+    LDA streamvolumeenvelope, X 
+    ASL 
+
+    TAY 
+    LDA VolumeEnvelopes, Y 
+    STA soundpointer
+    LDA VolumeEnvelopes+1, Y 
+    STA soundpointer+1 
+
+    ReadEnvelope: 
+        LDY streamvolumeenvelopeindex, X 
+        LDA (soundpointer), Y 
+        CMP #$FF 
+        BNE SetVolume
+        DEC streamvolumeenvelopeindex, X 
+        JMP ReadEnvelope
+
+    SetVolume:
+        STA soundtemp2
+
+        CPX ChannelConst::Triangle 
+        BNE Squares 
+        LDA soundtemp2 
+        BNE Squares
+        LDA #$80
+        BMI StoreVolume 
+
+    Squares: 
+        LDA streamvolduty, X 
+        AND #$F0
+        ORA soundtemp2 
+
+    StoreVolume:
+        LDY soundtemp1
+        STA ApuBuffer, Y 
+        INC streamvolumeenvelopeindex, X 
 
     LDA streamstatus, X 
     AND #%00000010
-    BEQ EndSoundSetAPU
+    BEQ EndSetVolume
 
     LDA streamchannel, X 
-    CMP #ChannelConst::Triangle
+    CMP ChannelConst::Triangle
     BEQ tri  
     LDA #$30 
     BNE store 
@@ -3149,13 +3215,14 @@ SoundSetAPU:
     tri: 
         LDA #$80 
     store: 
-        STA ApuBuffer, Y  
-EndSoundSetAPU:
-RTS 
+        STA ApuBuffer, Y
+
+EndSetVolume:
+RTS
 
 SoundWriteBufferToAPU: 
     SoundWriteSquare1Buffer:
-    LDA ApuBuffer
+    LDA ApuBuffer+0   
     STA $4000
     LDA ApuBuffer+1
     STA $4001
@@ -3197,10 +3264,13 @@ SoundWriteBufferToAPU:
     STA $400F 
 RTS
 
+
 SongHeaders:
     .word song0header
     .word song1header
 
+VolumeEnvelopes:
+    .word SoundEnvelope0, SoundEnvelope1, SoundEnvelope2, SoundEnvelope3, SoundEnvelope4
 
 ;;;;;;;;;;;;;;;;;;;;
 ; Tilebuffer
@@ -3520,6 +3590,27 @@ NoteLengthTable:
     .byte $30
     .byte $07
 
+SoundEnvelope0:
+    .byte $0F, $0E, $0D, $0C, $09, $05, $00
+    .byte $FF 
+SoundEnvelope1: 
+    .byte $01, $01, $02, $02, $03, $03, $04, $04, $07, $07
+    .byte $08, $08, $0A, $0A, $0C, $0C, $0D, $0D, $0E, $0E 
+    .byte $0F, $0F 
+    .byte $FF 
+SoundEnvelope2: 
+    .byte $0D, $0D, $0D, $0C, $0B, $00, $00, $00, $00, $00
+    .byte $00, $00, $00, $00, $06, $06, $06, $05, $04, $00
+    .byte $FF 
+SoundEnvelope3:
+    .byte $0F, $0B, $09, $08, $07, $06, $06
+    .byte $FF 
+
+SoundEnvelope4:
+    .byte $0B, $0B, $0A, $09, $08, $07, $06, $06, $06, $05
+    .byte $FF
+
+
 
 song0header:
     .byte $06 
@@ -3550,23 +3641,26 @@ song1header:
     .byte Stream::MusicSquareOne 
     .byte $01 
     .byte ChannelConst::SquareOne
-    .byte $77 
+    .byte $70  
+    .byte $03;SoundEnvelope3
     .word song1square1
-    .byte $40
+    .byte $53
 
     .byte Stream::MusicSquareTwo 
     .byte $01 
     .byte ChannelConst::SquareTwo
-    .byte $B7 
+    .byte $B0
+    .byte $04 ;SoundEnvelope4
     .word song1square2
-    .byte $40
+    .byte $53
 
     .byte Stream::MusicTriangle 
     .byte $01 
     .byte ChannelConst::Triangle
-    .byte $81 
+    .byte $80
+    .byte $04 ;SoundEnvelope4
     .word song1triangle
-    .byte $40
+    .byte $53
 
     .byte Stream::MusicNoise
     .byte $00
@@ -3579,19 +3673,66 @@ song1header:
 
 
 song1square1:
-    .byte NoteLength::thirtysecond, Octave::B2, Octave::D3, Octave::F3, Octave::GS3, Octave::B3, Octave::D4, Octave::F4, Octave::GS4, Octave::B4, Octave::D5, Octave::F5, Octave::GS5, Octave::B5, Octave::D6, Octave::F6, Octave::GS6
-    .byte Octave::BB2, Octave::DB3, Octave::E3, Octave::G3, Octave::BB3, Octave::DB4, Octave::E4, Octave::G4, Octave::BB4, Octave::DB5, Octave::E5, Octave::G5, Octave::BB5, Octave::DB6, Octave::E6, Octave::G6 
+    .byte NoteLength::eighth
+    .byte Octave::A2, Octave::A2, Octave::A2, Octave::A3, Octave::A2, Octave::A3, Octave::A2, Octave::A2  
+    .byte Octave::F3, Octave::F3, Octave::F3, Octave::F4, Octave::F3, Octave::F4, Octave::F3, Octave::F4
+    .byte Octave::A2, Octave::A2, Octave::A2, Octave::A3, Octave::A2, Octave::A3, Octave::A2, Octave::A2  
+    .byte Octave::F3, Octave::F3, Octave::F3, Octave::F4, Octave::F3, Octave::F4, Octave::F3, Octave::F4
+    .byte Octave::E3, Octave::E3, Octave::E3, Octave::E4, Octave::E3, Octave::E4, Octave::E3, Octave::E4  
+    .byte Octave::E3, Octave::E3, Octave::E3, Octave::E4, Octave::E3, Octave::E4, Octave::E3, Octave::E4
+    .byte Octave::DS3, Octave::DS3, Octave::DS3, Octave::DS4, Octave::DS3, Octave::DS4, Octave::DS3, Octave::DS4  
+    .byte Octave::D3, Octave::D3, Octave::D3, Octave::D4, Octave::D3, Octave::D4, Octave::D3, Octave::D4
+    .byte Octave::C3, Octave::C3, Octave::C3, Octave::C4, Octave::C3, Octave::C4, Octave::C3, Octave::C4
+    .byte Octave::B2, Octave::B2, Octave::B2, Octave::B3, Octave::B2, Octave::B3, Octave::B2, Octave::B3
+    .byte Octave::AS2, Octave::AS2, Octave::AS2, Octave::AS3, Octave::AS2, Octave::AS3, Octave::AS2, Octave::AS3 
+    .byte Octave::A2, Octave::A2, Octave::A2, Octave::A3, Octave::A2, Octave::A3, Octave::A2, Octave::A3
+    .byte Octave::GS2, Octave::GS2, Octave::GS2, Octave::GS3, Octave::GS2, Octave::GS3, Octave::GS2, Octave::GS3
+    .byte Octave::G2, Octave::G2, Octave::G2, Octave::G3, Octave::G2, Octave::G3, Octave::G2, Octave::G3
     .byte $FF 
 
 song1square2:
-    .byte NoteLength::thirtysecond, Octave::GS5, Octave::F5, Octave::D5, Octave::GS5, Octave::F5, Octave::D5, Octave::B4, Octave::F5, Octave::D5, Octave::B4, Octave::GS4, Octave::D5, Octave::B4, Octave::GS4, Octave::F4, Octave::B4 
-    .byte Octave::G5, Octave::E5, Octave::DB5, Octave::G5, Octave::E5, Octave::DB5, Octave::BB4, Octave::E5, Octave::DB5, Octave::BB4, Octave::G4, Octave::DB5, Octave::BB4, Octave::G4, Octave::E4, Octave::BB4 
+    .byte NoteLength::d_eighth
+    .byte Octave::rest
+    .byte NoteLength::eighth 
+    .byte Octave::A4, Octave::C5, Octave::B4, Octave::C5, Octave::A4, Octave::C5, Octave::B4, Octave::C5 
+    .byte Octave::A4, Octave::C5, Octave::B4, Octave::C5, Octave::A4, Octave::C5, Octave::B4, Octave::C5
+    .byte Octave::A4, Octave::C5, Octave::B4, Octave::C5, Octave::A4, Octave::C5, Octave::B4, Octave::C5
+    .byte Octave::A4, Octave::C5, Octave::B4, Octave::C5, Octave::A4, Octave::C5, Octave::B4, Octave::C5    
+    .byte Octave::AB4, Octave::B4, Octave::A4, Octave::B4, Octave::AB4, Octave::B4, Octave::A4, Octave::B4
+    .byte Octave::B4, Octave::E5, Octave::D5, Octave::E5, Octave::B4, Octave::E5, Octave::D5, Octave::E5
+    .byte Octave::A4, Octave::EB5, Octave::C5, Octave::EB5, Octave::A4, Octave::EB5, Octave::C5, Octave::EB5
+    .byte Octave::A4, Octave::D5, Octave::DB5, Octave::D5, Octave::A4, Octave::D5, Octave::DB5, Octave::D5
+    .byte Octave::A4, Octave::C5, Octave::F5, Octave::A5, Octave::C6, Octave::A5, Octave::F5, Octave::C5
+    .byte Octave::GB4, Octave::B4, Octave::EB5, Octave::GB5, Octave::B5, Octave::GB5, Octave::EB5, Octave::B4
+    .byte Octave::E4, Octave::A4, Octave::CS5, Octave::E5, Octave::A5, Octave::E5, NoteLength::sixteenth, Octave::CS5 , Octave::rest
+    .byte NoteLength::eighth
+    .byte Octave::DS4, Octave::GS4, Octave::C5, Octave::DS5, Octave::GS5, Octave::DS5, Octave::C5, Octave::GS4
+    .byte NoteLength::sixteenth
+    .byte Octave::G4, Octave::FS4, Octave::G4, Octave::FS4, Octave::G4, Octave::FS4, Octave::G4, Octave::FS4
+    .byte NoteLength::eighth
+    .byte Octave::G4, Octave::B4, Octave::D5, Octave::G5
     .byte $FF 
 
 song1triangle:
-    .byte NoteLength::thirtysecond, Octave::F6, Octave::D6, Octave::B5, Octave::D6, Octave::B5, Octave::GS5, Octave::B5, Octave::GS5, Octave::F5, Octave::GS5, Octave::F5, Octave::D5, Octave::F5, Octave::D5, Octave::B4, Octave::GS4
-    .byte Octave::E6, Octave::DB6, Octave::BB5, Octave::DB6, Octave::BB5, Octave::G5, Octave::BB5, Octave::G5, Octave::E5, Octave::G5, Octave::E5, Octave::DB5, Octave::E5, Octave::DB5, Octave::BB4, Octave::G4 
-    .byte $FF
+.byte NoteLength::eighth
+.byte Octave::A5, Octave::C6, Octave::B5, Octave::C6, Octave::A5, Octave::C6, Octave::B5, Octave::C6
+.byte Octave::A5, Octave::C6, Octave::B5, Octave::C6, Octave::A5, Octave::C6, Octave::B5, Octave::C6
+.byte Octave::A5, Octave::C6, Octave::B5, Octave::C6, Octave::A5, Octave::C6, Octave::B5, Octave::C6
+.byte Octave::A5, Octave::C6, Octave::B5, Octave::C6, Octave::A5, Octave::C6, Octave::B5, Octave::C6
+.byte Octave::AB5, Octave::B5, Octave::A5, Octave::B5, Octave::AB5, Octave::B5, Octave::A5, Octave::B5
+.byte Octave::B5, Octave::E6, Octave::D6, Octave::E6, Octave::B5, Octave::E6, Octave::D6, Octave::E6
+.byte Octave::A5, Octave::EB6, Octave::C6, Octave::EB6, Octave::A5, Octave::EB6, Octave::C6, Octave::EB6
+.byte Octave::A5, Octave::D6, Octave::DB6, Octave::D6, Octave::A5, Octave::D6, Octave::DB6, Octave::D6
+.byte Octave::A5, Octave::C6, Octave::F6, Octave::A6, Octave::C7, Octave::A6, Octave::F6, Octave::C6
+.byte Octave::GB5, Octave::B5, Octave::EB6, Octave::GB6, Octave::B6, Octave::GB6, Octave::EB6, Octave::B5
+.byte Octave::F5, Octave::BB5, Octave::D6, Octave::F6, Octave::GS6, Octave::F6, Octave::D6, Octave::AS5
+.byte Octave::E5, Octave::A5, Octave::CS6, Octave::E6, Octave::A6, Octave::E6, Octave::CS6, Octave::A5
+.byte Octave::DS5, Octave::GS5, Octave::C6, Octave::DS6, Octave::GS6, Octave::DS6, Octave::C6, Octave::GS5
+.byte NoteLength::sixteenth
+.byte Octave::G5, Octave::FS5, Octave::G5, Octave::FS5, Octave::G5, Octave::FS5, Octave::G5, Octave::FS5
+.byte Octave::G5, Octave::B5, Octave::D6, Octave::G6, Octave::B5, Octave::D6, Octave::B6, Octave::D7
+;.byte Octave::REPLACE, Octave::REPLACE, Octave::REPLACE, Octave::REPLACE, Octave::REPLACE, Octave::REPLACE, Octave::REPLACE, Octave::REPLACE
+.byte $FF
 
 .segment "VECTORS"      ; This part just defines what labels to go to whenever the nmi or reset is called 
     .word NMI           ; If you look at someone elses stuff they probably call this vblank or something
