@@ -323,6 +323,7 @@
     soundtemp2: .res 1
     soundsquare1old: .res 1
     soundsquare2old: .res 1
+    jumppointer: .res 2 
 ;; This tells the nes what to do when it starts up
 ;; We basically disable most things initially and initialise some others
 
@@ -3075,23 +3076,11 @@ SoundGetByte:
     BCC SoundDoNoteLength
 
 SoundDoOpcode:
-    CMP #$FF 
-    BNE EndSoundGetByte
+    JSR SoundOPLaunch 
+    INY 
     LDA streamstatus, X 
-    AND #%11111110
-    STA streamstatus, X 
-
-    LDA streamchannel, X 
-    CMP ChannelConst::Triangle 
-    BEQ SoundSilenceTriangle
-    LDA #$30 
-    BNE SoundSilence 
-
-SoundSilenceTriangle:
-    LDA #$80 
-SoundSilence:
-    STA streamvolduty, X 
-    JMP SoundUpdatePointer
+    AND #%00000001 
+    BNE SoundDoFetch
 SoundDoNoteLength: 
     AND #%01111111
     STY soundtemp1 
@@ -3148,7 +3137,7 @@ SoundSetAPU:
     ASL 
     TAY
 
-    JSR SoundSetStreamVolume 
+    JSR SoundSetStreamVolume
 
     LDA #$08 
     STA ApuBuffer+1, Y
@@ -3264,6 +3253,70 @@ SoundWriteBufferToAPU:
     STA $400F 
 RTS
 
+;;
+;; Opcodes
+;;
+
+SoundOPLaunch: 
+    STY soundtemp1 
+    SEC 
+    SBC #$A0
+    ASL 
+    TAY 
+    LDA SoundOPCodes, Y 
+    STA jumppointer 
+    LDA SoundOPCodes+1, Y
+    STA jumppointer+1 
+    LDY soundtemp1 
+    INY 
+    JMP (jumppointer) 
+
+SoundOP_EndSound:
+    LDA streamstatus, X 
+    AND #%11111110 
+    STA streamstatus, X 
+
+    LDA streamchannel, X 
+    CMP ChannelConst::Triangle
+    BEQ SilenceTri
+    LDA #$30
+    BNE Silence 
+    SilenceTri: 
+        LDA #$80
+    Silence: 
+        STA streamvolduty, X
+RTS 
+
+SoundOP_Loop: 
+    LDA (soundpointer), Y 
+    STA streampointerlow, X 
+    INY 
+    LDA (soundpointer), Y 
+    STA streampointerhigh, X 
+
+    STA soundpointer+1 
+    LDA streampointerlow 
+    STA soundpointer 
+    LDY #$FF
+RTS 
+
+SoundOP_ChangeEnvelope:
+    LDA (soundpointer), Y 
+    STA streamvolumeenvelope, X 
+    LDA #$00 
+    STA streamvolumeenvelopeindex, X 
+RTS 
+
+SoundOP_ChangeDuty: 
+    LDA (soundpointer), Y
+    STA streamvolduty, X
+RTS 
+
+SoundOPCodes:
+    .word SoundOP_EndSound ; A0
+    .word SoundOP_Loop ; A1 etc
+    .word SoundOP_ChangeEnvelope
+    .word SoundOP_ChangeDuty
 
 SongHeaders:
     .word song0header
@@ -3674,7 +3727,7 @@ song1header:
 
 song1square1:
     .byte NoteLength::eighth
-    .byte Octave::A2, Octave::A2, Octave::A2, Octave::A3, Octave::A2, Octave::A3, Octave::A2, Octave::A2  
+    .byte Octave::A2, Octave::A2, Octave::A2, Octave::A3, Octave::A2, Octave::A3, Octave::A2, Octave::A3  
     .byte Octave::F3, Octave::F3, Octave::F3, Octave::F4, Octave::F3, Octave::F4, Octave::F3, Octave::F4
     .byte Octave::A2, Octave::A2, Octave::A2, Octave::A3, Octave::A2, Octave::A3, Octave::A2, Octave::A2  
     .byte Octave::F3, Octave::F3, Octave::F3, Octave::F4, Octave::F3, Octave::F4, Octave::F3, Octave::F4
@@ -3688,7 +3741,8 @@ song1square1:
     .byte Octave::A2, Octave::A2, Octave::A2, Octave::A3, Octave::A2, Octave::A3, Octave::A2, Octave::A3
     .byte Octave::GS2, Octave::GS2, Octave::GS2, Octave::GS3, Octave::GS2, Octave::GS3, Octave::GS2, Octave::GS3
     .byte Octave::G2, Octave::G2, Octave::G2, Octave::G3, Octave::G2, Octave::G3, Octave::G2, Octave::G3
-    .byte $FF 
+    .byte $A1 
+    .word song1square1
 
 song1square2:
     .byte NoteLength::d_eighth
@@ -3711,7 +3765,9 @@ song1square2:
     .byte Octave::G4, Octave::FS4, Octave::G4, Octave::FS4, Octave::G4, Octave::FS4, Octave::G4, Octave::FS4
     .byte NoteLength::eighth
     .byte Octave::G4, Octave::B4, Octave::D5, Octave::G5
-    .byte $FF 
+    .byte $A1 
+    .word song1square2
+    ;.byte $FF 
 
 song1triangle:
 .byte NoteLength::eighth
@@ -3732,7 +3788,9 @@ song1triangle:
 .byte Octave::G5, Octave::FS5, Octave::G5, Octave::FS5, Octave::G5, Octave::FS5, Octave::G5, Octave::FS5
 .byte Octave::G5, Octave::B5, Octave::D6, Octave::G6, Octave::B5, Octave::D6, Octave::B6, Octave::D7
 ;.byte Octave::REPLACE, Octave::REPLACE, Octave::REPLACE, Octave::REPLACE, Octave::REPLACE, Octave::REPLACE, Octave::REPLACE, Octave::REPLACE
-.byte $FF
+    .byte $A1 
+    .word song1triangle
+;.byte $FF
 
 .segment "VECTORS"      ; This part just defines what labels to go to whenever the nmi or reset is called 
     .word NMI           ; If you look at someone elses stuff they probably call this vblank or something
