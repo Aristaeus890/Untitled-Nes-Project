@@ -3155,7 +3155,7 @@ SoundDoNoise:
         STA soundtemp2 
     NoiseMode0: 
         LDA soundtemp2 
-        STA streamnotelow
+        STA streamnotelow, X
 RTS
 
 SoundCheckRest: 
@@ -3791,7 +3791,7 @@ song1header:
     .byte $53
 
     .byte Stream::MusicNoise
-    .byte $00 
+    .byte $01 
     .byte ChannelConst::Noise 
     .byte $30 
     .byte $06 
