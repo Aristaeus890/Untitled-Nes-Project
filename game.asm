@@ -644,7 +644,7 @@ LDX #$00
     BufferLoop:
     STA TileBuffer, X 
     INX 
-    CPX #$FF 
+    CPX #$1F 
     BEQ :+
     JMP BufferLoop
 :
@@ -1249,6 +1249,7 @@ InputUp:
         STA entities+Entity::spriteno
         JSR CollideUp
 
+
 EndInputUp:
 RTS
 
@@ -1258,6 +1259,8 @@ InputUpRelease:
     BNE :+
     JSR InputNoteUp
     :
+    LDA #$00 
+    JSR SoundLoad 
 RTS
 
 InputDown:
@@ -1280,6 +1283,8 @@ InputDownRelease:
     BNE :+
     JSR InputNoteDown
     :
+    LDA #$03
+    JSR SoundLoad 
 RTS
 
 InputLeft:
@@ -1306,6 +1311,8 @@ InputLeftRelease:
     BNE :+
     JSR InputNoteLeft
     :
+    LDA #$04
+    JSR SoundLoad 
 RTS
 
 InputRight:
@@ -1332,6 +1339,8 @@ InputRightRelease:
     BNE :+
     JSR InputNoteRight
     :
+    LDA #$02 
+    JSR SoundLoad 
 RTS
 ;;;;;;
 ; Entitity creation
@@ -3394,7 +3403,7 @@ SongHeaders:
     .word song0header
     .word song1header
     .word song2header
-
+    .word song3header
 VolumeEnvelopes:
     .word SoundEnvelope0, SoundEnvelope1, SoundEnvelope2, SoundEnvelope3, SoundEnvelope4, SoundEnvelope5
 
@@ -3783,7 +3792,7 @@ song1header:
     .byte $53
 
     .byte Stream::MusicTriangle 
-    .byte $01 
+    .byte $01
     .byte ChannelConst::Triangle
     .byte $80
     .byte $04 ;SoundEnvelope4
@@ -3888,39 +3897,98 @@ song1noise:
     .byte Opcodes::InfiniteLoop 
     .word song1noise
 
-
-
 song2header:
-    .byte $04 ; #streams
+
+    .byte $04 
 
     .byte Stream::MusicSquareOne 
     .byte $01 
     .byte ChannelConst::SquareOne
-    .byte $70  
+    .byte $B0 
     .byte $03;SoundEnvelope3
     .word song2square1
-    .byte $50
+    .byte $40
 
     .byte Stream::MusicSquareTwo 
     .byte $00 
- 
+
     .byte Stream::MusicTriangle 
-    .byte $00 
- 
+    .byte $01
+    .byte ChannelConst::Triangle
+    .byte $81
+    .byte $04 ;SoundEnvelope4
+    .word song2triangle
+    .byte $40
+
     .byte Stream::MusicNoise
     .byte $00
 
 song2square1: 
-    .byte NoteLength::eighth
-    .byte Opcodes::SetNoteOffset, $00
-    .byte Opcodes::Loop1Counter, $05
-    song2square2loop: 
-    ;.byte Opcodes::ChangeNoteOffset, $06
-    .byte Octave::A2, Octave::A2, Octave::A2, Octave::A3, Octave::A2, Octave::A3, Octave::A2, Octave::A3
-    .byte Opcodes::Loop1
-    .word song2square2loop
+    .byte NoteLength::eighth 
+    .byte Octave::D4, Octave::A4, Octave::F4, Octave::A4, Octave::D4, Octave::B4, Octave::G4, Octave::B4 
+    .byte Octave::D4, Octave::C5, Octave::A4, Octave::C5, Octave::D4, Octave::AS4, Octave::F4, Octave::AS4 
+    .byte Octave::E4, Octave::A4, Octave::E4, Octave::A4, Octave::D4, Octave::A4, Octave::FS4, Octave::A4
+    .byte Octave::D4, Octave::A4, Octave::FS4, Octave::A4, Octave::G4, Octave::AS4, Octave::A4, Octave::C5 
+    .byte Octave::D4, Octave::C5, Octave::A4, Octave::C5, Octave::D4, Octave::B4, Octave::G4, Octave::B4
+    .byte Octave::D4, Octave::B4, Octave::G4, Octave::B4, Octave::D4, Octave::AS4, Octave::GS4, Octave::AS4 
+    .byte Octave::CS4, Octave::A4, Octave::E4, Octave::A4, Octave::D4, Octave::A4, Octave::E4, Octave::A4
+    .byte Octave::CS4, Octave::A4, Octave::E4, Octave::A4, Octave::B3, Octave::A4, Octave::CS4, Octave::A4
     .byte Opcodes::InfiniteLoop
     .word song2square1
+
+song2triangle: 
+    .byte NoteLength::quarter, Octave::D6, Octave::A6, NoteLength::half, Octave::G6
+    .byte NoteLength::eighth, Octave::F6, Octave::E6, NoteLength::quarter, Octave::D6
+    .byte NoteLength::eighth, Octave::C6, Octave::AS5, Octave::C6, Octave::A5
+    .byte NoteLength::quarter, Octave::E6, NoteLength::d_whole, Octave::D6
+    .byte NoteLength::quarter, Octave::A6, Octave::C7, NoteLength::d_half, Octave::B6
+    .byte NoteLength::eighth, Octave::G6, Octave::F6, NoteLength::quarter, Octave::E6
+    .byte NoteLength::eighth, Octave::F6, Octave::G6, NoteLength::whole, Octave::A6 
+    .byte Opcodes::InfiniteLoop
+    .word song2triangle
+
+
+
+
+
+song3header: 
+
+    .byte $04 
+
+    .byte Stream::MusicSquareOne 
+    .byte $00
+
+    .byte Stream::MusicSquareTwo 
+    .byte $00
+
+    .byte Stream::MusicTriangle 
+    .byte $00
+
+    .byte Stream::MusicNoise
+    .byte $01 
+    .byte ChannelConst::Noise 
+    .byte $30 
+    .byte $06 
+    .word song3noise
+    .byte 53 
+
+
+song3noise: 
+    .byte NoteLength::eighth 
+    .byte $04 
+    .byte NoteLength::sixteenth 
+    .byte $04, $04, $04
+    .byte NoteLength::eighth 
+    .byte $04 
+    .byte NoteLength::sixteenth 
+    .byte $04, $04, $04, $04
+    .byte NoteLength::eighth 
+    .byte $04, $04 
+    .byte Opcodes::InfiniteLoop 
+    .word song1noise
+    .byte Opcodes::InfiniteLoop
+    .word song3noise
+
 
 .segment "VECTORS"      ; This part just defines what labels to go to whenever the nmi or reset is called 
     .word NMI           ; If you look at someone elses stuff they probably call this vblank or something
