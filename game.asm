@@ -1283,7 +1283,7 @@ InputDownRelease:
     BNE :+
     JSR InputNoteDown
     :
-    LDA #$03
+    LDA #$02
     JSR SoundLoad 
 RTS
 
@@ -1311,7 +1311,7 @@ InputLeftRelease:
     BNE :+
     JSR InputNoteLeft
     :
-    LDA #$04
+    LDA #$03
     JSR SoundLoad 
 RTS
 
@@ -1339,7 +1339,7 @@ InputRightRelease:
     BNE :+
     JSR InputNoteRight
     :
-    LDA #$02 
+    LDA #$01 
     JSR SoundLoad 
 RTS
 ;;;;;;
@@ -3103,10 +3103,11 @@ SoundGetByte:
 
 SoundDoOpcode:
     JSR SoundOPLaunch 
-    INY 
+    INY
     LDA streamstatus, X 
     AND #%00000001 
     BNE SoundDoFetch
+    RTS 
 SoundDoNoteLength: 
     AND #%01111111
     STY soundtemp1 
