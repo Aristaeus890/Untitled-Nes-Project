@@ -669,7 +669,7 @@ STA pageX
 
 ; Enable the apu
 JSR SoundInit
-LDA #$01 ; load song #x
+LDA #$00 ; load song #x
 JSR SoundLoad
 
 JSR ChangePalleteBlack
@@ -965,7 +965,7 @@ ClearSpriteBuffer:
 ; I feel like this could be more efficient
 WaveFlip:
     LDA thirtyframe ; this can be changed. Currently useful with 15,30,60 frame
-    CMP #$00
+    
     BEQ Flip 
     JMP EndFlip
     Flip:
@@ -1238,7 +1238,7 @@ RTS
 
 InputUp:
     LDA gamemode
-    CMP #$00
+    
     BNE EndInputUp
     WalkUp:
         LDA entities+Entity::ypos
@@ -1265,7 +1265,7 @@ RTS
 
 InputDown:
     LDA gamemode 
-    CMP #$00 
+     
     BNE EndInputDown
     WalkDown:
     LDA entities+Entity::ypos
@@ -1289,12 +1289,12 @@ RTS
 
 InputLeft:
     LDA gamemode 
-    CMP #$00 
+     
     BNE EndInputLeft
     WalkLeft:
     LDA dxlow
     SEC
-    SBC #$10
+    SBC PlayerSpeed
     STA dxlow
     LDA dxhigh
     SBC #$00
@@ -1317,12 +1317,12 @@ RTS
 
 InputRight:
     LDA gamemode 
-    CMP #$00 
+     
     BNE EndInputRight
     WalkRight:
     LDA dxlow
     CLC 
-    ADC #$12
+    ADC PlayerSpeed   
     STA dxlow 
     LDA dxhigh
     ADC #$00
@@ -1506,7 +1506,7 @@ FireLoop:
     BEQ EndFireSpawn
 ; Check if the current index has nothing in it   
     LDA entities+Entity::type, X 
-    CMP #$00 ; NO TYPE
+     ; NO TYPE
     BEQ AddFire
     TXA 
     CLC 
@@ -1650,7 +1650,7 @@ ProcessBButtonJump:
 
     ProcessNote:
         LDA waveflip
-        CMP #$00
+        
         BEQ NoteLeft
          NoteRight:
             LDA entities+Entity::xpos, X 
@@ -1689,7 +1689,7 @@ ProcessBButtonJump:
 
     ProcessEurydice:
         LDA facing
-        CMP #$00
+        
         BEQ :+
         JMP ProcessEurydiceLeft
         :
@@ -1806,7 +1806,7 @@ DoScroll: ; check if the player is at the edge of the screen
     JMP EndDoScroll
     ScrollRight:
         LDA allowrightscroll
-        CMP #$00
+        
         BEQ :+
         JMP EndDoScroll
         :
@@ -1814,7 +1814,7 @@ DoScroll: ; check if the player is at the edge of the screen
         JMP EndDoScroll
     ScrollLeft:
         LDA allowleftscroll
-        CMP #$00
+        
         BEQ :+
         JMP EndDoScroll
         :
@@ -1914,7 +1914,7 @@ RTS
 
     CheckLeftDraw:
         LDA ScrollXEight
-        CMP #$00
+        
         BMI DrawLeftColumn
         RTS 
         DrawLeftColumn:
@@ -2224,7 +2224,7 @@ XMovement:
 
     ; check for postive/negative
     LDA dxhigh
-    CMP #$00
+    
     BEQ EndXMovement
 
     BIT dxhigh
@@ -2267,23 +2267,24 @@ ApplyFriction:
     BIT dxhigh 
     BMI FrictionP
 
-FrictionN:
+FrictionN: ; going right    
+    LDA dxlow
+    SEC
+    SBC FrictionValue
+    STA dxlow
+    BCS :+
+    DEC dxhigh
+    :
+RTS 
+
+FrictionP: ; going left
+
     LDA dxlow
     CLC 
     ADC FrictionValue
     STA dxlow
     LDA dxhigh
     ADC #$00
-    STA dxhigh
-RTS 
-
-FrictionP:
-    LDA dxlow
-    SEC
-    SBC FrictionValue
-    STA dxlow
-    LDA dxhigh
-    SBC #$00
     STA dxhigh
 RTS
 
@@ -2345,13 +2346,13 @@ RTS
 
 SingMode:
     LDA SingMode
-    CMP #$00
+    
     BNE :+
     RTS
     : 
 
     LDA noteflag
-    CMP #$00
+    
     BNE :+
     RTS
     :
@@ -2511,7 +2512,7 @@ OAMBuffer:
 
     DrawPlayer:
         LDA facing 
-        CMP #$00
+        
         BEQ :+
         JMP DrawPlayerLeft
         :
@@ -3505,7 +3506,9 @@ NMI:            ; this happens once a frame when the draw arm mabob is returning
 ;Variables
 
 FrictionValue:
-    .byte $09
+    .byte $18
+
+PlayerSpeed: .byte $30
 
 SpeedValue: ; nb, this includes the friction as an offset so change themboth if you change 1!
     .byte $19
@@ -3568,9 +3571,9 @@ WorldData: ; Each row is 32
     .byte $33,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$4B,$41,$41,$41,$41,$41,$41,$41,$41,$4C,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
     .byte $34,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$4B,$42,$42,$42,$42,$42,$42,$42,$42,$4C,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
 
-    .byte $33,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$4B,$25,$25,$25,$25,$25,$25,$25,$25,$4C,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
-    .byte $34,$24,$3B,$3C,$24,$24,$24,$24,$24,$24,$24,$4B,$45,$45,$45,$45,$45,$45,$45,$45,$4C,$24,$24,$24,$24,$24,$24,$24,$3B,$3C,$24,$24
-    .byte $33,$24,$3D,$3E,$24,$24,$24,$24,$24,$24,$24,$4B,$46,$46,$46,$46,$46,$46,$46,$46,$4C,$24,$24,$24,$24,$24,$24,$24,$3D,$3E,$24,$24
+    .byte $33,$24,$74,$75,$24,$24,$24,$24,$24,$24,$24,$4B,$25,$25,$25,$25,$25,$25,$25,$25,$4C,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $34,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$4B,$45,$45,$45,$45,$45,$45,$45,$45,$4C,$24,$24,$24,$24,$24,$24,$24,$3B,$3C,$24,$24
+    .byte $33,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$4B,$46,$46,$46,$46,$46,$46,$46,$46,$4C,$24,$24,$24,$24,$24,$24,$24,$3D,$3E,$24,$24
     .byte $34,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$4B,$27,$27,$27,$27,$27,$27,$27,$27,$4C,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24
 
     .byte $33,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$4B,$27,$27,$27,$27,$27,$27,$27,$27,$4C,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24
@@ -3976,17 +3979,15 @@ song3header:
 
 song3noise: 
     .byte NoteLength::eighth 
-    .byte $04 
+    .byte $18 
     .byte NoteLength::sixteenth 
-    .byte $04, $04, $04
+    .byte $18, $18, $18
     .byte NoteLength::eighth 
-    .byte $04 
+    .byte $18 
     .byte NoteLength::sixteenth 
-    .byte $04, $04, $04, $04
+    .byte $18, $18, $18, $18
     .byte NoteLength::eighth 
-    .byte $04, $04 
-    .byte Opcodes::InfiniteLoop 
-    .word song1noise
+    .byte $18, $18 
     .byte Opcodes::InfiniteLoop
     .word song3noise
 
