@@ -1,16 +1,21 @@
 ;;;; The header stuff is basically for the emulator
 
+; INes 1.0
 .segment "HEADER" 
 .byte "NES"
 .byte $1a
 .byte $02 ; 2 * 16KB PRG ROM
-.byte $01 ; 1 * 8KB CHR ROM
+.byte $02 ; 2 * 8KB CHR ROM
 .byte %00010011 ; mapper and mirroring
-.byte $0000  
+;.byte $0000  
+;.byte $00
+;.byte $00
+;.byte $00
 .byte $00
 .byte $00
 .byte $00
-.byte $00, $00, $00, $00, $00 ; filler bytes
+.byte "<"
+.byte "3Matt" ; filler bytes
 
 
 .scope EntityType
@@ -335,6 +340,9 @@
     soundsquare1old: .res 1
     soundsquare2old: .res 1
     jumppointer: .res 2 
+    currentbank: .res 1
+    collisionoffset: .res 1
+    scrollinprogress: .res 1
 ;; This tells the nes what to do when it starts up
 ;; We basically disable most things initially and initialise some others
 
@@ -465,7 +473,7 @@ SetMirroring: ; Doesn't work atm? Not sure if the mapper is incorrectly set up
 
 
 
-    LDA #%00000010
+    LDA #%00000010  
     STA $8000
     LSR
     STA $8000
@@ -521,7 +529,7 @@ InitWorld2:
 
  ;setup address in PPU for nametable data
     BIT $2002
-    LDA #$24
+    LDA #$28
     STA $2006
     LDA #$00
     STA $2006
@@ -567,7 +575,7 @@ SetAttributes:
 
 SetAttributes2:
     LDX #$00
-    LDA #$27
+    LDA #$2B
 
     STA $2006
     LDA #$C0
@@ -594,9 +602,13 @@ SetAttributes2:
 ;    LDA #$40
 ;    STA $4017
 
+
+
+
+
 SetPlayerPos: ; initial player position
-    LDA #$40
-    STA entities+Entity::xpos
+    LDA #$80
+    STA entities+Entity::ypos
     LDA #$A0
     STA entities+Entity::xpos
 
@@ -634,9 +646,9 @@ streamvolumeenvelope = $0398 ; -> 039D
 streamvolumeenvelopeindex = $039E ; -> 03A3
 streamloop1 = $03A4 ; -> 03A9
 streamnoteoffset = $03AA ; -> 03AF 
-NoteInputMem = $0398 ; 0350 -> 0343
-
-AudioMem = $0400
+TileBuffer2 = $03B0 ; -> 03CF
+CollisionMap = $03D0 ; -> 04D0 240 bytes
+NoteInputMem = $0400 ; dont delete this 
 
 FillTileBuffer:
 LDA #$22
@@ -652,7 +664,7 @@ LDX #$00
 LDA #$20 ; put this somewhere else? 
 STA nextnote
 
-LDA #$08
+LDA #$10
 STA ScrollXEight
 
 ;Set movespeed
@@ -664,13 +676,47 @@ STA dxlow
 ;Set Zeropage variables
 LDA #$01
 STA pageY
-LDA #$03
+LDA #$01
 STA pageX
 
 ; Enable the apu
 JSR SoundInit
 LDA #$00 ; load song #x
 JSR SoundLoad
+
+; Set Control
+
+LDA #%00000011
+
+STA $8000
+LSR 
+STA $8000
+LSR 
+STA $8000
+LSR 
+STA $8000
+LSR 
+STA $8000
+
+; Set Bank
+LDA #%00000010
+
+STA $A000
+LSR
+STA $A000
+LSR
+STA $A000
+LSR
+STA $A000
+LSR
+STA $A000 
+
+JSR CheckWorldMapRight
+
+LDA #<TestMetaTiles
+STA world
+LDA #>TestMetaTiles
+STA world+1
 
 JSR ChangePalleteBlack
 JSR SpawnFourNotes
@@ -695,17 +741,10 @@ JSR ChangePalleteOrange
 ;This is the forever loop, it goes here whenever its taken out of the NMI intterupt loop. Here is *ideally* where non draw stuff will happen...
 ; It runs through the whole game loop, then waits for the screen to be drawn then loops back to the beginning.
 Loop:
-
-    JSR DoWorldMap 
-    JSR WaveFlip    ; This simply flips between 1 and 0. Used for directional variance
-    JSR NoteIndex   ; This changes the note sprite that will spawn
-    JSR ReadButtons ; Duh
-    ;JSR SoundLoad
-    JSR CollideDown ; Think about moving this together with movement?
-    JSR XMovement ; the player movement
-    JSR ProcessEntities ; entity behaviour is handled here, the player has some special stuff elsewhere
+    JSR DoGameLogic 
     JSR IncFrameCount   ; Counts to 59 then resets to 0
-    JSR DoScroll       
+    JSR AlternateBanks
+    ;JSR DoScroll       
     JSR OAMBuffer   ; Sprite data is written to the buffer here`
     JSR WriteToTileBuffer ; write to the tile buffer when scrolling
 
@@ -779,7 +818,7 @@ RTS
 
 DrawColumnNMI:
     ; Check if the flag has been set to draw a new column
-    LDA DrawColumnFlag
+    LDA scrollinprogress
     CMP #$01 
     BEQ :+
     JMP ColumnPPUCheck
@@ -816,6 +855,23 @@ DrawColumnNMI:
     INY 
     DEX
     BNE DrawColumnNMILoop
+
+    SendColumnToPPU2:
+    LDA $2002
+    LDA columnhigh
+    STA $2006
+    LDA columnlow
+    CLC 
+    ADC #$01
+    STA $2006
+    LDX #$1E ; Loop equal to screenheight/8 
+    LDY #$00
+    DrawColumnNMILoop2: ; Loop until 1 column is drawn
+    LDA TileBuffer2, X ; Grab the tile ids from the tilebuffer  
+    STA $2007
+    INY 
+    DEX
+    BNE DrawColumnNMILoop2
 RTS
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -823,6 +879,27 @@ RTS
 ;;;;;;;;;;;;;;;;;;   all the stuff in the main loop 
 ;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+DoGameLogic: 
+    LDA scrollinprogress 
+    BNE :+
+
+    JSR DoWorldMap
+    JSR CheckPlayerPosition 
+    JSR WaveFlip    ; This simply flips between 1 and 0. Used for directional variance
+    JSR NoteIndex   ; This changes the note sprite that will spawn
+    JSR ReadButtons ; Duh
+    ;JSR SoundLoad
+    ;JSR CollideDown ; Think about moving this together with movement?
+    JSR XMovement ; the player movement
+    JSR ProcessEntities ; entity behaviour is handled here, the player has some special stuff elsewhere
+    JMP EndDoGameLogic
+
+    :
+    JSR ScrollSingleScreen
+
+EndDoGameLogic:
+RTS
 
 ;;;;;;;;;;
 ;; World Map functions go here
@@ -878,76 +955,38 @@ GetMapPosRight:
     ADC #$01
     TAX 
     LDA WorldMap, X 
-    CMP #MapTileNo::MapZero
-    BEQ SetWorldDataZero
-    CMP #MapTileNo::MapOne
-    BEQ SetWorldDataOne
-    CMP #MapTileNo::MapTwo
-    BEQ SetWorldDataTwo
-    CMP #MapTileNo::MapThree
-    BEQ SetWorldDataThree
-    CMP #MapTileNo::MapFour
-    BEQ SetWorldDataFour
-    CMP #MapTileNo::MapFive
-    BEQ SetWorldDataFive
-    CMP #MapTileNo::MapSix
-    BEQ SetWorldDataSix
+    ASL 
+    TAX
+    LDA ScreenList, X
+    STA world
+    LDA ScreenList+1, X 
+    STA world+1
     JMP EndGetMapPosRight
-
-    SetWorldDataZero:
-        LDA #< WorldData
-        STA world 
-        LDA #> WorldData
-        STA world+1
-        JMP EndGetMapPosRight
-
-    SetWorldDataOne:
-        LDA #< WorldData
-        STA world 
-        LDA #> WorldData
-        STA world+1
-        JMP EndGetMapPosRight
-
-    SetWorldDataTwo:
-        LDA #< WorldData3
-        STA world 
-        LDA #> WorldData3
-        STA world+1
-        JMP EndGetMapPosRight
-
-    SetWorldDataThree:
-        LDA #< WorldData
-        STA world 
-        LDA #> WorldData
-        STA world+1
-        JMP EndGetMapPosRight
-
-    SetWorldDataFour:
-        LDA #< WorldData2
-        STA world 
-        LDA #> WorldData2
-        STA world+1
-        JMP EndGetMapPosRight
-
-    SetWorldDataFive:
-        LDA #< WorldData3
-        STA world 
-        LDA #> WorldData3
-        STA world+1
-        JMP EndGetMapPosRight
-
-    SetWorldDataSix:
-        LDA #< WorldData3
-        STA world 
-        LDA #> WorldData3
-        STA world+1
-        JMP EndGetMapPosRight
-
-
-
 
     EndGetMapPosRight:
 RTS
+
+CheckPlayerPosition:
+    LDA entities+Entity::xpos 
+    CMP #$EF 
+    BCS ScrollRight2 
+    RTS 
+  
+    ScrollRight2: 
+        LDA allowrightscroll
+        BEQ :+ 
+        JMP EndCheckPlayerPosition
+        :
+        LDA #$20
+        STA entities+Entity::xpos
+
+        LDA #$01 
+        STA scrollinprogress
+
+EndCheckPlayerPosition:
+RTS 
+
+
 
 ; Wipe the sprite buffer
 ;;; TODO: Make buffer wiping dynamic, wastes cycles clearing empty space
@@ -1320,6 +1359,10 @@ InputRight:
      
     BNE EndInputRight
     WalkRight:
+    JSR CollideTestRight
+    LDA return
+    BNE EndInputRight
+
     LDA dxlow
     CLC 
     ADC PlayerSpeed   
@@ -1329,7 +1372,7 @@ InputRight:
     STA dxhigh
     LDA #$00
     STA entities+Entity::spriteno
-    JSR CollideRight
+    ;JSR CollideRight
 EndInputRight:
 RTS
 
@@ -1806,8 +1849,7 @@ DoScroll: ; check if the player is at the edge of the screen
     JMP EndDoScroll
     ScrollRight:
         LDA allowrightscroll
-        
-        BEQ :+
+        BEQ :+ 
         JMP EndDoScroll
         :
         JSR DoRightScroll
@@ -1848,24 +1890,24 @@ RTS
 
     CheckRightDraw:
         LDA ScrollXEight
-        CMP #$08
+        CMP #$10
         BCS DrawRightColumn
         RTS
         DrawRightColumn: ; divide by 8 for each tile
             ; Inrecent the column number. If it hits the limit wrap around 
             LDA ScrollXEight
             SEC 
-            SBC #$08
+            SBC #$10
             STA ScrollXEight
 
             LDA columnnumber
             CLC 
-            ADC #$01
+            ADC #$02
             ;AND #%00011111
-            CMP #$21
+            CMP #$22
             BNE :+
             INC pageX
-            LDA #$01
+            LDA #$02
             :
             STA columnnumber
         
@@ -1881,7 +1923,7 @@ RTS
             ASL 
             ASL  
             CLC 
-            ADC #$20
+            ADC #$20 
             STA columnhigh
 
             
@@ -1953,9 +1995,101 @@ RTS
             EOR #$01
             STA DrawColumnLeftFlag
         RTS
+
+ScrollSingleScreen:
+    LDA ScrollX
+    CLC 
+    ADC #$10
+    STA ScrollX   
+    SEC 
+    SBC #$10
+    LSR 
+    LSR 
+    LSR 
+    STA columnlow
+    LDA #$20
+    STA columnhigh
+
+    LDA columnnumber
+    CLC 
+    ADC #$01
+    STA columnnumber
+RTS 
+    
 ;;;;;;;;;
 ;;Collision madoodles
 ;;;;;;;
+
+WriteToCollisionMap:
+    JSR GetMapPosRight
+
+    LDY #$00 
+    WriteToCollisionMapLoop:
+        LDA (world), Y  
+        STA CollisionMap, Y 
+        INY 
+        CPY #$F0 
+        BEQ :+
+        JMP WriteToCollisionMapLoop
+        :
+RTS 
+
+CollideTestRight:
+    LDA entities+Entity::xpos
+    CLC 
+    ADC #$03
+    LSR 
+    LSR
+    LSR
+    LSR
+    STA temp
+
+    LDA entities+Entity::ypos
+    LSR 
+    LSR
+    LSR
+    LSR
+    STA temp2
+
+    ASL 
+    ASL 
+    ASL 
+    ASL 
+    CLC 
+    ADC temp
+    TAY 
+    LDA (world), Y
+
+    TAY 
+    LDA MetaTileList, Y 
+    STA jumppointer
+    LDA MetaTileList+1, Y 
+    STA jumppointer+1 
+
+    LDY #$00
+    LDX #$00
+    CollideRightLoop: 
+    LDA (jumppointer), Y 
+    CMP #$24 
+    BNE CollideRightHit
+    INY 
+    CPY #$03
+    BEQ:+
+    JMP CollideRightLoop
+    :
+    LDA #$00
+    STA return
+    RTS
+
+    CollideRightHit:
+    LDA #$01
+    STA return
+    LDA #$00
+    STA dxhigh
+    STA dxlow
+    RTS 
+
+
 
 CollideDown:
     LDA #$00
@@ -2357,6 +2491,52 @@ SingMode:
     RTS
     :
 RTS
+
+;;;;
+; Bank Switching
+;;;;
+
+AlternateBanks:
+    LDA framecount
+    BEQ :+
+    RTS
+    :
+    LDA currentbank
+    EOR #$02 
+    STA currentbank 
+    JSR SetBank
+    RTS
+
+MapperControl: ; Takes value of A and uses shift register to set control
+
+; Lower 5 bytes == CHR Bank Mode -> PRG Bank Mode x 2 -> Mirroring x2
+
+    STA $8000
+    LSR 
+    STA $8000
+    LSR 
+    STA $8000
+    LSR 
+    STA $8000
+    LSR 
+    STA $8000
+RTS
+; Set Bank
+
+SetBank: ; sets A as the bank to be used
+; lower 5 bits. lowest ignored in 8kb mode
+
+    STA $A000
+    LSR
+    STA $A000
+    LSR
+    STA $A000
+    LSR
+    STA $A000
+    LSR
+    STA $A000
+RTS 
+
 
 ;;;;;;
 ; Palette functions
@@ -3414,32 +3594,25 @@ VolumeEnvelopes:
 ;;;;;;;;;;;;;;;;;;;;
 WriteToTileBuffer:
     CheckTileDrawFlag:
-        LDA DrawColumnFlag
-        CMP #$01 
+        LDA scrollinprogress
         BEQ :+
-        JMP CheckTileDrawFlagLeft
-        :
         JMP WriteColumnToBuffer
-
-    CheckTileDrawFlagLeft:
-        LDA DrawColumnLeftFlag
-        CMP #$01 
-        BEQ :+ 
-        RTS 
         :
-        JMP WriteColumnToBufferLeft    
-
-
+        RTS
 
     WriteColumnToBuffer:
+        JSR GetMapPosRight
+
         LDA world ; take the low byte
         STA columnaddress ; store low byte in z page
         LDA world+1 ; take the high byte
         STA columnaddress+1 ; store high into the world address +1 i.e the second byte of the address
 
+
         LDA columnnumber
         SEC 
         SBC #$01
+        ;lsr
         CLC 
         ADC columnaddress
         STA columnaddress 
@@ -3448,20 +3621,100 @@ WriteToTileBuffer:
         ADC #$00
         STA columnaddress+1
 
-        LDX #$1E
         LDY #$00
+        LDX #$1E
     WriteTileLoop:
-        LDA (columnaddress),Y 
-        STA TileBuffer, X
+        LDY #$00
+        LDA (columnaddress), Y ; also use this to write into the collision?
+
+        ASL
+        TAY  
+        LDA MetaTileList, Y 
+        STA world
+        LDA MetaTileList+1, Y
+        STA world+1
+
+        
+
+        LDY #$00
+
+        LDA (world), Y 
+        STA TileBuffer, X 
+        INY 
+        LDA (world), Y 
+        STA TileBuffer2, X
+        INY 
+        DEX
+        LDA (world), Y 
+        STA TileBuffer, X 
+        INY 
+        LDA (world), Y 
+        STA TileBuffer2, X 
+        
         LDA columnaddress
         CLC 
-        ADC #$20
+        ADC #$10
         STA columnaddress
-        LDA columnaddress+1
+        LDA columnaddress+1   
         ADC #$00
         STA columnaddress+1
-        DEX
-        BNE WriteTileLoop
+
+        DEX 
+        BEQ :+
+        JMP WriteTileLoop
+        :
+        LDA columnnumber
+        CMP #$11
+        BNE :+
+        LDA #$00 
+        STA scrollinprogress
+        STA columnnumber
+        STA ScrollX
+        JSR WriteToCollisionMap
+        INC pageX
+        
+        :
+
+RTS 
+
+        ;LDY #$00
+        ;LDA (columnaddress), Y
+        ;TAY
+
+        ;LDY #$00
+        ;LDA (columnaddress), Y 
+        ;TAY 
+        ;LDA MetaTileList, Y 
+        ;STA world 
+        ;LDA MetaTileList+1, Y 
+        ;STA world+1
+
+        ;LDA (world), Y 
+        ;STA TileBuffer, X 
+        ;INY
+        ;INY  
+        ;LDA (world), Y 
+        ;STA TileBuffer-1, X 
+
+        ;LDY #$01
+        ;LDA (world), Y 
+        ;STA TileBuffer2, X 
+    ;    INY 
+     ;   INY 
+      ;  LDA (world), Y 
+       ; STA TileBuffer2, X 
+
+        ;LDA columnaddress
+        ;CLC 
+        ;ADC #$10
+        ;STA columnaddress
+        ;LDA columnaddress+1
+        ;ADC #$00
+        ;STA columnaddress+1
+        ;DEX
+        ;DEX
+        ;BNE WriteTileLoop
+        
 RTS
 
     WriteColumnToBufferLeft:
@@ -3494,7 +3747,7 @@ RTS
         ADC #$00
         STA columnaddress+1
         DEX
-        BNE WriteTileLoop
+        BNE WriteTileLoopLeft
 RTS
 
 ;;;;;;;;;;;;;;;;;;;
@@ -3541,7 +3794,7 @@ SoundData:
 
 WorldMap: ; read into this index to get screendata and when not to scroll further
     .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF 
-    .byte $FF, $00, $01, $02, $03, $04, $05, $FF
+    .byte $FF, $01, $00, $01, $00, $01, $00, $FF
     .byte $FF, $06, $07, $08, $09, $0A, $0B, $FF
     .byte $FF, $0C, $0D, $0E, $0F, $10, $11, $FF
     .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
@@ -3558,12 +3811,12 @@ WorldData: ; Each row is 32
 
     .byte $33,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24 
     .byte $34,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
-    .byte $33,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
-    .byte $34,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $33,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$72,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $34,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$6C,$6A,$73,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
 
-    .byte $33,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
-    .byte $34,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
-    .byte $33,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $33,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$26,$69,$71,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $34,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$26,$69,$71,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
+    .byte $33,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$26  ,$67,$70,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
     .byte $34,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$24,$3F,$40,$24,$24,$24,$24,$24,$24,$24,$24
 
     .byte $33,$24,$24,$24,$24,$24,$24,$24,$43,$44,$24,$24,$47,$47,$47,$47,$47,$47,$47,$47,$24,$24,$43,$44,$24,$24,$24,$24,$24,$24,$24,$24
@@ -3681,18 +3934,18 @@ TileMap: ;1= solid
     .byte $01,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$01
     .byte $01,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$01
     
-    .byte $01,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$01,$01
-    .byte $01,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$01
-    .byte $01,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$01
-    .byte $01,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$01
+    .byte $01,$00,$00,$00,$00,$00,$00,$00,$00,$01,$00,$00,$00,$00,$01,$01
+    .byte $01,$00,$00,$00,$00,$00,$00,$00,$00,$01,$00,$00,$00,$00,$00,$01
+    .byte $01,$00,$00,$00,$00,$00,$00,$00,$00,$01,$00,$00,$00,$01,$00,$01
+    .byte $01,$00,$00,$00,$00,$00,$00,$00,$00,$01,$00,$00,$00,$01,$00,$01
 
-    .byte $01,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$01
-    .byte $01,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$01
-    .byte $01,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$01
-    .byte $01,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$01
+    .byte $01,$00,$00,$00,$00,$00,$00,$00,$00,$01,$00,$00,$00,$01,$00,$01
+    .byte $01,$00,$00,$00,$00,$00,$00,$00,$00,$01,$00,$00,$00,$01,$00,$01
+    .byte $01,$00,$00,$00,$00,$00,$00,$00,$00,$01,$00,$00,$00,$01,$00,$01
+    .byte $01,$00,$00,$00,$00,$00,$00,$00,$00,$01,$00,$00,$00,$01,$00,$01
 
-    .byte $01,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$01
-    .byte $01,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$01
+    .byte $01,$00,$00,$00,$00,$00,$00,$00,$00,$01,$00,$00,$00,$01,$00,$01
+    .byte $01,$00,$00,$00,$00,$00,$00,$00,$00,$01,$00,$00,$00,$01,$00,$01
     .byte $01,$01,$00,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01
 
 NoteTable:  
@@ -3991,6 +4244,217 @@ song3noise:
     .byte Opcodes::InfiniteLoop
     .word song3noise
 
+MetaTileList:
+.word Blank0 ;0
+.word Blank1
+.word Blank3
+.word Dock
+.word DockTop
+.word Wave1 ;5
+.word Wave2
+.word Wave3
+.word BrazierLeft
+.word BrazierRight
+.word PotLargeTop ;0a
+.word PotLargeBottom
+.word PotSmall 
+.word LadderLeft
+.word LadderRight
+.word LadderLeftTop ;0f
+.word PillarTop ;10
+.word PillarBottom
+.word PillarBlank
+.word PillarVine 
+.word Path
+.word Path2
+.word ArchTopLeft ;16
+.word ArchTopRight
+.word ArchBottomLeft
+.word ArchBottomRight
+.word TorchRight 
+.word SlopeLeft
+.word SlopeRight ;1c
+.word WaterTransition
+.word Grass
+.word Grass2
+; 4x4 tile definitions
+Blank0:
+    .byte $24, $24
+    .byte $24, $24 
+
+Blank1: 
+    .byte $25, $25 
+    .byte $25, $25
+
+Blank2:
+    .byte $26, $26
+    .byte $26, $26
+
+Blank3:
+    .byte $27, $27
+    .byte $27, $27
+
+Dock:
+    .byte $CA, $CB
+    .byte $25, $25
+
+DockTop:
+    .byte $24, $BB
+    .byte $CA, $CB
+
+Wave1:
+    .byte $BC, $BD
+    .byte $25, $25
+
+Wave2:
+    .byte $BE, $BC
+    .byte $25, $25
+
+Wave3: 
+    .byte $BD, $BE 
+    .byte $25, $25
+
+BrazierLeft:
+    .byte $AA, $24
+    .byte $BA, $24
+
+BrazierRight:
+    .byte $24, $AA
+    .byte $24, $BA
+
+
+PotLargeTop:
+    .byte $24, $24
+    .byte $81, $82
+
+
+PotLargeBottom:
+    .byte $83, $84
+    .byte $87, $88
+
+
+PotSmall:
+    .byte $85, $86
+    .byte $89, $8A
+
+
+LadderLeft:
+    .byte $90, $24
+    .byte $90, $24
+
+LadderRight:
+    .byte $24, $90
+    .byte $24, $90
+
+LadderLeftTop:
+    .byte $24, $90
+    .byte $24, $90
+
+PillarTop:
+    .byte $56, $57
+    .byte $54, $55
+
+PillarBottom:
+    .byte $52, $53
+    .byte $4e, $4f
+
+PillarBlank:
+    .byte $50, $51
+    .byte $50, $51
+
+PillarVine:
+    .byte $52, $53
+    .byte $54, $55
+
+    .byte $24, $24
+    .byte $94, $94
+
+Path:
+    .byte $94, $94
+    .byte $27, $27
+
+Path2:
+    .byte $94, $94
+    .byte $27, $27
+
+ArchTopLeft:
+    .byte $80, $80
+    .byte $8b, $8c
+
+ArchTopRight:
+    .byte $80, $80
+    .byte $8d, $8e
+
+ArchBottomLeft:
+    .byte $9B, $9C
+    .byte $AB, $AC 
+
+ArchBottomRight:
+    .byte $9D, $9E
+    .byte $AD, $AE 
+
+TorchRight:
+    .byte $24, $AA
+    .byte $24, $24
+
+SlopeLeft:
+    .byte $24, $7E
+    .byte $7E, $80
+
+SlopeRight:
+    .byte $7F, $24
+    .byte $00, $7F
+
+WaterTransition:
+    .byte $BF,$BF 
+    .byte $26,$26
+
+Grass:
+    .byte $24, $24
+    .byte $93, $24
+
+Grass2:
+    .byte $24, $24
+    .byte $24, $95
+
+ScreenList:
+.word TestMetaTiles
+.word TestMetaTiles1
+
+TestMetaTiles:
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $1E, $00, $00, $00, $1F, $00, $00, $00, $1F, $00, $00, $00, $00
+.byte $15, $0F, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $00, $00, $00
+.byte $10, $0E, $00, $00, $00, $00, $10, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $13, $0E, $00, $00, $00, $00, $12, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $12, $0E, $00, $00, $00, $00, $13, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $11, $0E, $00, $00, $1E, $00, $11, $00, $00, $00, $00, $00, $08, $00, $00, $00
+.byte $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $03, $05, $06, $07
+.byte $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D
+.byte $01, $02, $01, $02, $01, $02, $01, $02, $01, $02, $01, $02, $01, $02, $01, $02
+.byte $02, $01, $02, $01, $02, $01, $02, $01, $02, $01, $02, $01, $02, $01, $02, $01
+
+TestMetaTiles1:
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $0A, $00, $00, $00, $16, $17, $00, $00, $00, $0A, $00, $00, $00, $00
+.byte $00, $1E, $1F, $00, $0C, $09, $18, $19, $08, $0C, $00, $0B, $00, $00, $00, $00
+.byte $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15
+.byte $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02
+.byte $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02
+.byte $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02
+
 
 .segment "VECTORS"      ; This part just defines what labels to go to whenever the nmi or reset is called 
     .word NMI           ; If you look at someone elses stuff they probably call this vblank or something
@@ -3998,3 +4462,5 @@ song3noise:
      
 .segment "CHARS" ; sprite/tile data goes here
     .incbin "Bank1.chr"
+    .incbin "Bank2.chr"
+
