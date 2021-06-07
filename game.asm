@@ -719,7 +719,7 @@ LDA #>TestMetaTiles
 STA world+1
 
 JSR ChangePalleteBlack
-JSR SpawnFourNotes
+;JSR SpawnFourNotes
 JSR ChangePalleteOrange
 ;JSR SpawnEurydice
 
@@ -1277,8 +1277,12 @@ RTS
 
 InputUp:
     LDA gamemode
-    
     BNE EndInputUp
+    JSR CollideTestUp
+    BEQ :+ 
+    JSR SetDX0
+    JMP EndInputUp
+    :
     WalkUp:
         LDA entities+Entity::ypos
         SEC 
@@ -1286,9 +1290,6 @@ InputUp:
         STA entities+Entity::ypos
         LDA #$18
         STA entities+Entity::spriteno
-        JSR CollideUp
-
-
 EndInputUp:
 RTS
 
@@ -1306,6 +1307,11 @@ InputDown:
     LDA gamemode 
      
     BNE EndInputDown
+    JSR CollideTestDown
+    BEQ :+ 
+    JSR SetDX0
+    JMP EndInputDown
+    :
     WalkDown:
     LDA entities+Entity::ypos
     CLC
@@ -1331,6 +1337,11 @@ InputLeft:
      
     BNE EndInputLeft
     WalkLeft:
+    JSR CollideTestLeft 
+    BEQ :+ 
+    JSR SetDX0
+    JMP EndInputLeft
+    :
     LDA dxlow
     SEC
     SBC PlayerSpeed
@@ -1340,7 +1351,6 @@ InputLeft:
     STA dxhigh
     LDA #$00
     STA entities+Entity::spriteno
-    JSR CollideLeft
 EndInputLeft:
 RTS
 
@@ -1360,9 +1370,10 @@ InputRight:
     BNE EndInputRight
     WalkRight:
     JSR CollideTestRight
-    LDA return
-    BNE EndInputRight
-
+    BEQ :+ 
+    JSR SetDX0
+    JMP EndInputRight
+    :
     LDA dxlow
     CLC 
     ADC PlayerSpeed   
@@ -1840,162 +1851,6 @@ DestroyPlayer: ; unused atm
     STA entities+Entity::spriteno
 RTS 
 
-DoScroll: ; check if the player is at the edge of the screen   
-    LDA entities+Entity::xpos  
-    CMP ScrollBoundary
-    BCS ScrollRight
-    CMP ScrollBoundaryLeft
-    BCC ScrollLeft
-    JMP EndDoScroll
-    ScrollRight:
-        LDA allowrightscroll
-        BEQ :+ 
-        JMP EndDoScroll
-        :
-        JSR DoRightScroll
-        JMP EndDoScroll
-    ScrollLeft:
-        LDA allowleftscroll
-        
-        BEQ :+
-        JMP EndDoScroll
-        :
-        JSR DoLeftScroll
-    EndDoScroll: 
-RTS  
-    
-    DoRightScroll:
-        LDA entities+Entity::xpos
-        SEC 
-        SBC ScrollBoundary
-        PHA 
-        CLC 
-        ADC ScrollXEight
-        STA ScrollXEight
-        PLA 
-        CLC
-        ADC ScrollX  
-        STA ScrollX
-        BCC MovePlayerBack
-        LDA currenttable
-        EOR #$01
-        STA currenttable
-        MovePlayerBack:
-        LDA ScrollBoundary
-        STA entities+Entity::xpos
-    EndDoRightScroll:
-        JSR GetMapPosRight
-        JSR CheckRightDraw
-    RTS
-
-    CheckRightDraw:
-        LDA ScrollXEight
-        CMP #$10
-        BCS DrawRightColumn
-        RTS
-        DrawRightColumn: ; divide by 8 for each tile
-            ; Inrecent the column number. If it hits the limit wrap around 
-            LDA ScrollXEight
-            SEC 
-            SBC #$10
-            STA ScrollXEight
-
-            LDA columnnumber
-            CLC 
-            ADC #$02
-            ;AND #%00011111
-            CMP #$22
-            BNE :+
-            INC pageX
-            LDA #$02
-            :
-            STA columnnumber
-        
-
-            LDA ScrollX
-            LSR 
-            LSR 
-            LSR
-            STA columnlow
-
-            LDA currenttable
-            EOR #$01
-            ASL 
-            ASL  
-            CLC 
-            ADC #$20 
-            STA columnhigh
-
-            
-            LDA DrawColumnFlag ; set a flag that a new coloumn needs to be drawn to the nametable
-            EOR #$01
-            STA DrawColumnFlag       
-        RTS
-
-    DoLeftScroll:
-        LDA entities+Entity::xpos 
-        SEC  
-        SBC ScrollBoundaryLeft
-        PHA 
-        SEC
-        SBC ScrollXEight
-        PLA 
-        SEC 
-        SBC ScrollX
-        STA ScrollX
-        BCS MovePlayerForward
-        LDA currenttable
-        EOR #$01
-        STA currenttable
-        MovePlayerForward:
-        LDA ScrollBoundaryLeft
-        STA entities+Entity::xpos
-    EndDoLeftScroll:
-        JSR CheckLeftDraw
-    RTS
-
-    CheckLeftDraw:
-        LDA ScrollXEight
-        
-        BMI DrawLeftColumn
-        RTS 
-        DrawLeftColumn:
-            LDA ScrollXEight
-            CLC 
-            ADC #$08 
-            STA ScrollXEight
-
-            DEC columnnumber
-            LDA columnnumber
-            AND #%00011111
-            STA columnnumber
-            BNE :+
-            DEC pageX
-            :
-
-            LDA ScrollX
-            SEC 
-            SBC #$08
-
-            LSR 
-            LSR 
-            LSR 
-
-            STA columnlow
-
-            LDA currenttable
-            ;EOR #$01
-            ASL 
-            ASL 
-            CLC 
-            ADC #$20
-            STA columnhigh
-
-            LDA DrawColumnLeftFlag
-            EOR #$01
-            STA DrawColumnLeftFlag
-        RTS
-
 ScrollSingleScreen:
     LDA ScrollX
     CLC 
@@ -2023,10 +1878,15 @@ RTS
 WriteToCollisionMap:
     JSR GetMapPosRight
 
-    LDY #$00 
+    LDY #$00
+    LDX #$00
+    STY temp 
     WriteToCollisionMapLoop:
-        LDA (world), Y  
-        STA CollisionMap, Y 
+        LDA (world), Y
+        STY temp
+        TAX
+        LDA CollisionList, X 
+        STA CollisionMap, Y  
         INY 
         CPY #$F0 
         BEQ :+
@@ -2034,10 +1894,11 @@ WriteToCollisionMap:
         :
 RTS 
 
+; collide tests return 0 for no collide,1 for a hit
 CollideTestRight:
     LDA entities+Entity::xpos
     CLC 
-    ADC #$03
+    ADC #$10
     LSR 
     LSR
     LSR
@@ -2058,294 +1919,91 @@ CollideTestRight:
     CLC 
     ADC temp
     TAY 
-    LDA (world), Y
+    LDA CollisionMap, Y 
+    JMP CollideResult
 
+CollideTestLeft:
+    LDA entities+Entity::xpos
+    SEC 
+    SBC #$01
+    LSR 
+    LSR
+    LSR
+    LSR
+    STA temp
+
+    LDA entities+Entity::ypos
+    LSR 
+    LSR
+    LSR
+    LSR
+    STA temp2
+
+    ASL 
+    ASL 
+    ASL 
+    ASL 
+    CLC 
+    ADC temp
     TAY 
-    LDA MetaTileList, Y 
-    STA jumppointer
-    LDA MetaTileList+1, Y 
-    STA jumppointer+1 
+    LDA CollisionMap, Y 
+    JMP CollideResult
+CollideTestUp:
+    LDA entities+Entity::xpos
+    LSR 
+    LSR
+    LSR
+    LSR
+    STA temp
 
-    LDY #$00
-    LDX #$00
-    CollideRightLoop: 
-    LDA (jumppointer), Y 
-    CMP #$24 
-    BNE CollideRightHit
-    INY 
-    CPY #$03
-    BEQ:+
-    JMP CollideRightLoop
-    :
-    LDA #$00
-    STA return
-    RTS
+    LDA entities+Entity::ypos
+    SEC 
+    SBC #$01 
+    LSR 
+    LSR
+    LSR
+    LSR
+    STA temp2
 
-    CollideRightHit:
-    LDA #$01
-    STA return
-    LDA #$00
-    STA dxhigh
-    STA dxlow
-    RTS 
+    ASL 
+    ASL 
+    ASL 
+    ASL 
+    CLC 
+    ADC temp
+    TAY 
+    LDA CollisionMap, Y 
+    JMP CollideResult
 
+CollideTestDown:
+    LDA entities+Entity::xpos
+    LSR 
+    LSR
+    LSR
+    LSR
+    STA temp
 
-
-CollideDown:
-    LDA #$00
-    STA return
-    ; LSR 4 times to divide by 16 (the size of our tiles on the tile map)
     LDA entities+Entity::ypos
     CLC 
-    ADC #$0F ; add an offset of 16 for total entity height  
-    LSR 
-    LSR 
+    ADC #$10 
     LSR 
     LSR
-    STA boxy1
-    STA boxy2 
-
-    LDA entities+Entity::xpos
-    LSR 
-    LSR 
-    LSR 
     LSR
-    STA boxx1 
-    CLC 
-    ADC #$01 ; The sprite width is 16, divide that by 16 to account for the tile map 
-    STA boxx2
+    LSR
+    STA temp2
 
-    CheckCollideOne:
-        LDA boxy1 ; x16 for the width of the tile map
-        ASL ;2
-        ASL ;4
-        ASL ;8
-        ASL ; 16
-        CLC 
-        ADC boxx1
-
-    
-        TAX ; move to x so can be index
-        STX return ; for debug 
-        LDA TileMap, X 
-        CMP #$01
-        BEQ CollisionDown
-  
-    CheckCollideTwo:
-    LDA boxy2 
-    ASL ;2
-    ASL ;4
-    ASL ;8
     ASL 
-    CLC
-    ADC boxx2 
-
-    TAX
-    STX return 
-    LDA TileMap, X 
-    CMP #$01 
-    BEQ CollisionDown
-    RTS
-
-    CollisionDown:
-        LDA #$01 
-        STA return
-        LDA entities+Entity::ypos
-        CLC 
-        SBC #$01
-        STA entities+Entity::ypos
-        RTS
-
-
-CollideUp:
-    LDA #$00
-    STA return
-    ; LSR 4 times to divide by 16 (the size of our tiles on the tile map)
-    LDA entities+Entity::ypos 
-    LSR 
-    LSR 
-    LSR 
-    LSR
-    STA boxy1
-    STA boxy2 
-
-    LDA entities+Entity::xpos
-    LSR 
-    LSR 
-    LSR 
-    LSR
-    STA boxx1 
-    CLC 
-    ADC #$01 ; The sprite width is 16, divide that by 16 to account for the tile map 
-    STA boxx2
-
-    CheckCollideOneUp:
-        LDA boxy1 ; x16 for the width of the tile map
-        ASL ;2
-        ASL ;4
-        ASL ;8
-        ASL ; 16
-        CLC 
-        ADC boxx1
-
-    
-        TAX ; move to x so can be index
-        STX return ; for debug 
-        LDA TileMap, X 
-        CMP #$01
-        BEQ CollisionUp 
-  
-    CheckCollideTwoUp:
-    LDA boxy2 
-    ASL ;2
-    ASL ;4
-    ASL ;8
     ASL 
-    CLC
-    ADC boxx2 
-
-    TAX
-    STX return 
-    LDA TileMap, X 
-    CMP #$01 
-    BEQ CollisionUp
-    RTS
-
-    CollisionUp:
-        LDA #$01 
-        STA return
-        LDA entities+Entity::ypos
-        CLC 
-        ADC #$01
-        STA entities+Entity::ypos
-        RTS
-
-    CollideRight:
-    LDA #$00
-    STA return
-    ; LSR 4 times to divide by 16 (the size of our tiles on the tile map)
-    LDA entities+Entity::ypos  
-    LSR 
-    LSR 
-    LSR 
-    LSR
-    STA boxy1
-    CLC 
-    ADC #$01
-    STA boxy2 
-
-    LDA entities+Entity::xpos
-    LSR 
-    LSR 
-    LSR 
-    LSR 
-    CLC 
-    ADC #$01 ; The sprite width is 16, divide that by 16 to account for the tile map 
-    STA boxx1
-    STA boxx2
-
-    CheckCollideOneRight:
-        LDA boxy1 ; x16 for the width of the tile map
-        ASL ;2
-        ASL ;4
-        ASL ;8
-        ASL ; 16
-        CLC 
-        ADC boxx1
-
-    
-        TAX ; move to x so can be index
-        STX return ; for debug 
-        LDA TileMap, X 
-        CMP #$01
-        BEQ CollisionRight
-  
-    CheckCollideTwoRight:
-    LDA boxy2 
-    ASL ;2
-    ASL ;4
-    ASL ;8
     ASL 
-    CLC
-    ADC boxx2 
-
-    TAX
-    STX return 
-    LDA TileMap, X 
-    CMP #$01 
-    BEQ CollisionRight
-    RTS
-
-    CollisionRight:
-        LDA #$01 
-        STA return
-        LDA entities+Entity::xpos
-        CLC 
-        SBC #$01
-        STA entities+Entity::xpos
-        RTS
-
-    CollideLeft:
-    LDA #$00
-    STA return
-    ; LSR 4 times to divide by 16 (the size of our tiles on the tile map)
-    LDA entities+Entity::ypos  
-    LSR 
-    LSR 
-    LSR 
-    LSR
-    STA boxy1
-    CLC 
-    ADC #$01
-    STA boxy2 
-
-    LDA entities+Entity::xpos
-    LSR 
-    LSR 
-    LSR 
-    LSR 
-    STA boxx1
-    STA boxx2
-
-    CheckCollideOneLeft:
-        LDA boxy1 ; x16 for the width of the tile map
-        ASL ;2
-        ASL ;4
-        ASL ;8
-        ASL ; 16
-        CLC 
-        ADC boxx1
-
-        TAX ; move to x so can be index
-        STX return ; for debug 
-        LDA TileMap, X 
-        CMP #$01
-        BEQ CollisionLeft
-  
-    CheckCollideTwoLeft:
-    LDA boxy2 
-    ASL ;2
-    ASL ;4
-    ASL ;8
     ASL 
-    CLC
-    ADC boxx2 
-
-    TAX
-    STX return 
-    LDA TileMap, X 
-    CMP #$01 
-    BEQ CollisionLeft
-    RTS
-
-    CollisionLeft:
-        LDA #$01 
-        STA return
-        LDA entities+Entity::xpos
-        CLC 
-        ADC #$02
-        STA entities+Entity::xpos
-        RTS
+    CLC 
+    ADC temp
+    TAY 
+    LDA CollisionMap, Y 
+    JMP CollideResult
+CollideResult: 
+    STA return 
+RTS  
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;; movement mechanics
@@ -2421,6 +2079,13 @@ FrictionP: ; going left
     ADC #$00
     STA dxhigh
 RTS
+
+SetDX0:
+    LDA #$00 
+    STA dxhigh
+    STA dxlow 
+RTS 
+
 
 ;;;;;;;;;;
 ; Stuff to do with singing
@@ -2498,6 +2163,7 @@ RTS
 
 AlternateBanks:
     LDA framecount
+    CMP #$20
     BEQ :+
     RTS
     :
@@ -3677,44 +3343,7 @@ WriteToTileBuffer:
 
 RTS 
 
-        ;LDY #$00
-        ;LDA (columnaddress), Y
-        ;TAY
 
-        ;LDY #$00
-        ;LDA (columnaddress), Y 
-        ;TAY 
-        ;LDA MetaTileList, Y 
-        ;STA world 
-        ;LDA MetaTileList+1, Y 
-        ;STA world+1
-
-        ;LDA (world), Y 
-        ;STA TileBuffer, X 
-        ;INY
-        ;INY  
-        ;LDA (world), Y 
-        ;STA TileBuffer-1, X 
-
-        ;LDY #$01
-        ;LDA (world), Y 
-        ;STA TileBuffer2, X 
-    ;    INY 
-     ;   INY 
-      ;  LDA (world), Y 
-       ; STA TileBuffer2, X 
-
-        ;LDA columnaddress
-        ;CLC 
-        ;ADC #$10
-        ;STA columnaddress
-        ;LDA columnaddress+1
-        ;ADC #$00
-        ;STA columnaddress+1
-        ;DEX
-        ;DEX
-        ;BNE WriteTileLoop
-        
 RTS
 
     WriteColumnToBufferLeft:
@@ -4258,8 +3887,8 @@ MetaTileList:
 .word PotLargeTop ;0a
 .word PotLargeBottom
 .word PotSmall 
-.word LadderLeft
-.word LadderRight
+.word LadderLeft ; d
+.word LadderRight ; e
 .word LadderLeftTop ;0f
 .word PillarTop ;10
 .word PillarBottom
@@ -4277,166 +3906,326 @@ MetaTileList:
 .word WaterTransition
 .word Grass
 .word Grass2
+.word CrackedWall1 ;20
+.word CrackedWall2 ; 
+.word HangingVine1
+.word HangingVine2
+.word BrickPath
+.word BrickPathVine ; 25
+.word PotLargeTopEnclosed
+.word BrickTopVine
+.word BrickTop ; 28 
+.word ScreenTop1
+.word ScreenTop2 ;2a
+.word ScreenBot1 
+.word ScreenBot2
+.word ScreenBot3
+.word ScreenBot4
+.word ScreenBot5
+.word ScreenBot6 ;30
+.word BlockingBrick
+.word Brick
+.word BlankBlocking
+.word BrickVine 
+.word BrickVine2
+
 ; 4x4 tile definitions
 Blank0:
-    .byte $24, $24
-    .byte $24, $24 
+    .byte $24, $24 ; pattern tabl
+    .byte $24, $24 ; pattern table
+    .byte $00      ; collision
 
 Blank1: 
     .byte $25, $25 
     .byte $25, $25
+    .byte $01     
 
 Blank2:
     .byte $26, $26
     .byte $26, $26
+    .byte $01     
 
 Blank3:
     .byte $27, $27
     .byte $27, $27
+    .byte $01     
 
 Dock:
     .byte $CA, $CB
     .byte $25, $25
+    .byte $01     
 
 DockTop:
     .byte $24, $BB
     .byte $CA, $CB
+    .byte $01     
 
 Wave1:
     .byte $BC, $BD
     .byte $25, $25
+    .byte $01     
 
 Wave2:
     .byte $BE, $BC
     .byte $25, $25
+    .byte $01     
 
 Wave3: 
     .byte $BD, $BE 
     .byte $25, $25
+    .byte $01     
 
 BrazierLeft:
     .byte $AA, $24
     .byte $BA, $24
+    .byte $01     
 
 BrazierRight:
     .byte $24, $AA
     .byte $24, $BA
+    .byte $01     
 
 
 PotLargeTop:
     .byte $24, $24
     .byte $81, $82
-
+    .byte $01     
 
 PotLargeBottom:
     .byte $83, $84
     .byte $87, $88
-
+    .byte $01     
 
 PotSmall:
     .byte $85, $86
     .byte $89, $8A
-
+    .byte $01     
 
 LadderLeft:
-    .byte $90, $24
-    .byte $90, $24
+    .byte $90, $90
+    .byte $90, $90
+    .byte $00     
 
 LadderRight:
-    .byte $24, $90
-    .byte $24, $90
+    .byte $90, $90
+    .byte $90, $90
+    .byte $00     
 
 LadderLeftTop:
-    .byte $24, $90
-    .byte $24, $90
+    .byte $94, $90
+    .byte $27, $90
+    .byte $00     
 
 PillarTop:
     .byte $56, $57
     .byte $54, $55
+    .byte $01     
 
 PillarBottom:
     .byte $52, $53
     .byte $4e, $4f
+    .byte $01     
 
 PillarBlank:
     .byte $50, $51
     .byte $50, $51
+    .byte $01     
 
 PillarVine:
     .byte $52, $53
     .byte $54, $55
-
-    .byte $24, $24
-    .byte $94, $94
+    .byte $01     
 
 Path:
     .byte $94, $94
     .byte $27, $27
+    .byte $01     
 
 Path2:
     .byte $94, $94
     .byte $27, $27
+    .byte $01     
 
 ArchTopLeft:
     .byte $80, $80
     .byte $8b, $8c
+    .byte $01     
 
 ArchTopRight:
     .byte $80, $80
     .byte $8d, $8e
+    .byte $01     
 
 ArchBottomLeft:
     .byte $9B, $9C
     .byte $AB, $AC 
+    .byte $01     
 
 ArchBottomRight:
     .byte $9D, $9E
     .byte $AD, $AE 
+    .byte $01     
 
 TorchRight:
     .byte $24, $AA
     .byte $24, $24
+    .byte $01     
 
 SlopeLeft:
     .byte $24, $7E
     .byte $7E, $80
+    .byte $01     
 
 SlopeRight:
     .byte $7F, $24
     .byte $00, $7F
+    .byte $01     
 
 WaterTransition:
     .byte $BF,$BF 
     .byte $26,$26
+    .byte $01     
 
 Grass:
     .byte $24, $24
     .byte $93, $24
+    .byte $01     
 
 Grass2:
     .byte $24, $24
     .byte $24, $95
+    .byte $01     
+
+CrackedWall1:
+    .byte $79, $7A
+    .byte $7B, $77
+    .byte $01     
+
+CrackedWall2:
+    .byte $77, $7C
+    .byte $7D, $80
+    .byte $01     
+
+HangingVine1: 
+    .byte $AF, $9F
+    .byte $9A, $24
+    .byte $01     
+
+HangingVine2: 
+    .byte $9F, $AF
+    .byte $24, $9A
+    .byte $01     
+
+BrickPath: 
+    .byte $24, $24
+    .byte $80, $80 
+    .byte $01     
+
+BrickPathVine:
+    .byte $24, $24 
+    .byte $99, $9F
+    .byte $01     
+    
+PotLargeTopEnclosed: 
+    .byte $80, $80 
+    .byte $81, $82
+    .byte $01     
+
+BrickTopVine:
+    .byte $9F, $8F 
+    .byte $24, $24
+    .byte $01     
+
+BrickTop:
+    .byte $80, $80 
+    .byte $24, $24
+    .byte $01     
+
+ScreenTop1:
+    .byte $32, $32 
+    .byte $38, $37
+    .byte $01     
+
+ScreenTop2:
+    .byte $39, $3A 
+    .byte $24, $24
+    .byte $01     
+
+ScreenBot1:
+    .byte $24, $24 
+    .byte $2C, $2D
+    .byte $01     
+
+ScreenBot2:
+    .byte $2E, $2F 
+    .byte $32, $32
+    .byte $01   
+
+ScreenBot3:
+    .byte $24, $24 
+    .byte $30, $2C
+    .byte $01   
+
+ScreenBot4:
+    .byte $31, $2E 
+    .byte $32, $32
+    .byte $01   
+
+ScreenBot5:
+    .byte $24, $24 
+    .byte $2D, $30
+    .byte $01   
+ScreenBot6:
+    .byte $2F, $31 
+    .byte $32, $32
+    .byte $01   
+
+BlockingBrick:
+    .byte $80, $80 
+    .byte $80, $80
+
+Brick:
+    .byte $80, $80 
+    .byte $80, $80
+
+BlankBlocking: 
+    .byte $24, $24
+    .byte $24, $24
+
+BrickVine: 
+    .byte $8F, $9F
+    .byte $AF, $97
+
+BrickVine2: 
+    .byte $97, $99
+    .byte $AF, $98
+
+CollisionList:
+    .byte $00,$01,$01,$01,$01,$01,$01,$01,$01,$00,$00,$01,$01,$00,$00,$00 ;00 -> 0F
+    .byte $01,$00,$01,$01,$01,$01,$01,$01,$00,$00,$01,$01,$01,$01,$00,$00 ;10 -> 1F
+    .byte $01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01 ;20 -> 2F
+    .byte $01,$01,$00,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01 ;30 -> 3F
 
 ScreenList:
 .word TestMetaTiles
 .word TestMetaTiles1
 
 TestMetaTiles:
-.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $00, $00, $00, $1E, $00, $00, $00, $1F, $00, $00, $00, $1F, $00, $00, $00, $00
-.byte $15, $0F, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $00, $00, $00
-.byte $10, $0E, $00, $00, $00, $00, $10, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $13, $0E, $00, $00, $00, $00, $12, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $12, $0E, $00, $00, $00, $00, $13, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $11, $0E, $00, $00, $1E, $00, $11, $00, $00, $00, $00, $00, $08, $00, $00, $00
+.byte $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29
+.byte $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A
+.byte $10, $33, $33, $33, $33, $33, $33, $33, $33, $33, $33, $33, $33, $33, $33, $33
+.byte $13, $33, $33, $33, $33, $33, $33, $33, $33, $33, $33, $33, $33, $33, $33, $33
+.byte $13, $33, $33, $33, $33, $33, $33, $00, $16, $17, $00, $00, $00, $00, $00, $00
+.byte $11, $00, $00, $1E, $00, $00, $00, $1F, $18, $19, $1F, $00, $00, $33, $00, $00
+.byte $15, $0E, $15, $15, $15, $15, $15, $15, $15, $15, $15, $0E, $15, $00, $00, $00
+.byte $10, $0E, $33, $00, $00, $00, $00, $00, $00, $10, $00, $0E, $00, $00, $00, $00
+.byte $12, $0E, $33, $00, $00, $25, $25, $25, $25, $11, $00, $0E, $00, $00, $00, $00
+.byte $12, $0E, $33, $00, $1B, $26, $20, $22, $31, $26, $35, $0E, $00, $33, $00, $00
+.byte $11, $0E, $00, $1B, $20, $0B, $31, $0C, $21, $0B, $34, $0E, $08, $00, $00, $00
 .byte $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $03, $05, $06, $07
 .byte $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D
-.byte $01, $02, $01, $02, $01, $02, $01, $02, $01, $02, $01, $02, $01, $02, $01, $02
-.byte $02, $01, $02, $01, $02, $01, $02, $01, $02, $01, $02, $01, $02, $01, $02, $01
+.byte $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B
+.byte $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C
 
 TestMetaTiles1:
 .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
