@@ -564,7 +564,7 @@ SetAttributes:
     LDA #$C0
     STA $2006
     AttributeLoop:
-    LDA #$00
+    LDA TestMetaTilesAttributes, X 
     STA $2007
     INX
     CPX #$40
@@ -572,39 +572,6 @@ SetAttributes:
 
     LDX #$00
     LDY #$00    
-
-SetAttributes2:
-    LDX #$00
-    LDA #$2B
-
-    STA $2006
-    LDA #$C0
-    STA $2006
-    AttributeLoop2:
-    LDA #$00
-    STA $2007
-    INX
-    CPX #$40
-    BNE AttributeLoop2
-
-    LDX #$00
-    LDY #$00
-
-;InitApu:
-;   LDY #$13
-;  InitApuLoop:
-;    LDA APURegs, Y 
-;    STA $4000, Y 
-;    DEY 
-;    BPL InitApuLoop
-;    LDA #$0F 
-;    STA $4015
-;    LDA #$40
-;    STA $4017
-
-
-
-
 
 SetPlayerPos: ; initial player position
     LDA #$80
@@ -2162,8 +2129,7 @@ RTS
 ;;;;
 
 AlternateBanks:
-    LDA framecount
-    CMP #$20
+    LDA thirtyframe
     BEQ :+
     RTS
     :
@@ -3406,8 +3372,8 @@ VerticalWave:
     .byte $00,$FF,$FF,$FF,$FF,$FE,$FE,$FE,$FE,$FE,$FE,$FD,$FD,$FD,$FD,$FD,$FD,$FD,$FD,$FE,$FE,$FE,$FE,$FE,$FE,$02,$FF,$FF,$FF,$FF
 
 PaletteData:
-    .byte $17,$00,$0C,$0F,  $0F,$07,$17,$0F,  $0F,$07,$10,$0F, $0F,$14,$15,$16  ;background palette data  
-    .byte $17,$27,$14,$1A,  $22,$09,$1C,$0C,  $04,$16,$30,$27,$30,$0F,$36,$17  ;sprite palette data
+    .byte $17,$0C,$00,$0F,  $17,$0A,$00,$0F,  $17,$1C,$0C,$0F, $0F,$06,$04,$0F  ;background palette data  
+    .byte $17,$27,$14,$1A,  $22,$09,$1C,$0C,  $04,$16,$30,$27, $30,$0F,$36,$17  ;sprite palette data
 
 BackGroundPaletteBlack:
     .byte $0F,$00,$0C,$0F,  $0F,$07,$17,$0F,  $0F,$07,$10,$0F, $0F,$14,$15,$16  ;background palette data  
@@ -3928,6 +3894,10 @@ MetaTileList:
 .word BlankBlocking
 .word BrickVine 
 .word BrickVine2
+.word Rain1 ;36
+.word Rain2
+.word PillarCircularLeft
+.word PillarCircularRight
 
 ; 4x4 tile definitions
 Blank0:
@@ -4200,11 +4170,27 @@ BrickVine2:
     .byte $97, $99
     .byte $AF, $98
 
+Rain1:
+    .byte $A8, $A9
+    .byte $A9, $A8
+
+Rain2:
+    .byte $A9, $A8
+    .byte $A8, $A9
+
+PillarCircularLeft:
+    .byte $5B, $5C
+    .byte $5B, $5C
+
+PillarCircularRight:
+    .byte $5D, $5E
+    .byte $5D, $5E
+
 CollisionList:
     .byte $00,$01,$01,$01,$01,$01,$01,$01,$01,$00,$00,$01,$01,$00,$00,$00 ;00 -> 0F
     .byte $01,$00,$01,$01,$01,$01,$01,$01,$00,$00,$01,$01,$01,$01,$00,$00 ;10 -> 1F
     .byte $01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01 ;20 -> 2F
-    .byte $01,$01,$00,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01 ;30 -> 3F
+    .byte $01,$01,$00,$01,$01,$00,$01,$00,$00,$01,$01,$01,$01,$01,$01,$01 ;30 -> 3F
 
 ScreenList:
 .word TestMetaTiles
@@ -4213,10 +4199,10 @@ ScreenList:
 TestMetaTiles:
 .byte $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29
 .byte $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A
-.byte $10, $33, $33, $33, $33, $33, $33, $33, $33, $33, $33, $33, $33, $33, $33, $33
-.byte $13, $33, $33, $33, $33, $33, $33, $33, $33, $33, $33, $33, $33, $33, $33, $33
-.byte $13, $33, $33, $33, $33, $33, $33, $00, $16, $17, $00, $00, $00, $00, $00, $00
-.byte $11, $00, $00, $1E, $00, $00, $00, $1F, $18, $19, $1F, $00, $00, $33, $00, $00
+.byte $10, $33, $33, $33, $33, $38, $39, $33, $38, $39, $33, $33, $33, $33, $33, $33
+.byte $13, $33, $33, $33, $33, $38, $39, $33, $38, $39, $33, $33, $33, $33, $33, $33
+.byte $13, $33, $33, $33, $33, $38, $39, $00, $38, $39, $00, $00, $00, $00, $00, $00
+.byte $11, $33, $33, $1E, $00, $38, $39, $1F, $38, $39, $1F, $00, $00, $33, $00, $00
 .byte $15, $0E, $15, $15, $15, $15, $15, $15, $15, $15, $15, $0E, $15, $00, $00, $00
 .byte $10, $0E, $33, $00, $00, $00, $00, $00, $00, $10, $00, $0E, $00, $00, $00, $00
 .byte $12, $0E, $33, $00, $00, $25, $25, $25, $25, $11, $00, $0E, $00, $00, $00, $00
@@ -4226,6 +4212,16 @@ TestMetaTiles:
 .byte $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D, $1D
 .byte $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B
 .byte $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C
+
+TestMetaTilesAttributes:
+    .byte $55, $55, $55, $55, $55, $55, $55, $55 
+    .byte $55, $00, $00, $00, $00, $00, $55, $55
+    .byte $55, $00, $00, $00, $00, $00, $55, $55
+    .byte $55, $55, $55, $55, $55, $55, $55, $55
+    .byte $55, $55, $55, $55, $55, $55, $55, $55
+    .byte $55, $00, $00, $00, $00, $55, $AB, $AA
+    .byte $AA, $AA, $AA, $AA, $AA, $AA, $AA, $AA
+    .byte $AA, $AA, $AA, $AA, $AA, $AA, $AA, $AA
 
 TestMetaTiles1:
 .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
