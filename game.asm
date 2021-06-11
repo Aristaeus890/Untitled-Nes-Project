@@ -260,7 +260,7 @@
 ;todo: entities currently cant be moved bc references to its abs loc in other places 
 .segment "ZEROPAGE" ; LSB 0 - FF
 ;; Reserve memory for some specific things we need not to be futzed with
-    SpriteMem: .res 2 ; unused
+    seed: .res 2 ; unused
     world: .res 2  ; used during startup, not after that
     buttons: .res 1 ; used for polling controller
     nmidone: .res 1 ; ppu is done when this is 1 ;
@@ -271,7 +271,7 @@
     FlipSprite: .res 1 ; 0 is right, 1 is left, not used atm
     animation: .res 1 ; unused 
     XOffset: .res 1 ; unused
-    YOffset: .res 1 ; unused
+    YOffset: .res 1 ; unused  
     moving: .res 1 ;unused
     anioffset: .res 1 ; unused
     facing: .res 1 ; player facing direction determines sprite
@@ -280,7 +280,7 @@
     mapposindex: .res 1 ; unused
    ;NB DO NOT DELETE ANY OF THESE EVEN IF THEY AREN'T BEING USED IT WILL MESS UP THE ENTITY HANDLER ATM
 
-    MAXENTITIES = 30
+    MAXENTITIES =10
      ; max allowed number of entities
     entities: .res .sizeof(Entity) * MAXENTITIES 
     TOTALENTITIES = .sizeof(Entity) * MAXENTITIES
@@ -453,7 +453,7 @@ CLEARENTITIES:
 
     LDX #$00
 
-;; Increment through the Pallete data and store it into the PPU
+;; Increment through the Palette data and store it into the PPU
 LoadPalettes:
     LDA PaletteData, X
     STA $2007 ; $3F00, $3F01, $3F02 => $3F1F
@@ -550,7 +550,10 @@ SetPlayerPos: ; initial player position
     LDA #> WorldData ; take the high byte
     STA columnaddress+1 ; store high into the world address +1 i.e the second byte of the address
 
-
+InitSeed: 
+    LDA #$01 
+    STA seed 
+    STA seed+1
 ; map some memory baabbbby!
 ; All sprite data is to be stored here and retrieved every frame
 ; Sprite buffer takes 4x64 = 256 bytes
@@ -646,10 +649,10 @@ STA world
 LDA #>TestMetaTiles
 STA world+1
 
-JSR ChangePalleteBlack
+JSR ChangePaletteBlack
 ;JSR SpawnFourNotes
-JSR ChangePalleteOrange
-;JSR SpawnEurydice
+JSR ChangePaletteOrange
+jSR SpawnEurydice
 
 ; Enable interrupts
     CLI
@@ -705,7 +708,7 @@ MAINLOOP:
     JSR DrawColumnNMI
     JSR ReadSprites ; Get the sprites from the sprite buffer and write them to the ppu  
     JSR ReadScroll  ; Send the current scroll to the ppu
-    JSR UpdatePalleteNMI
+    JSR UpdatePaletteNMI
 
     LDA #%10010000
     ORA currenttable
@@ -829,6 +832,28 @@ DoGameLogic:
 
 EndDoGameLogic:
 RTS
+
+;;;; 
+;RNG GENERATOR 
+;;;;
+
+Prng: 
+    LDY #08     ; iteration count (generates 8 bits)
+	LDA seed+0
+:
+	ASL        ; shift the register
+	ROL seed+1
+	BCC :+
+	EOR #$39   ; apply XOR feedback whenever a 1 bit is shifted out
+:
+	DEY
+	BNE :--
+	STA seed+0
+	CMP #00     ; reload flags
+	RTS
+
+
+
 
 ;;;;;;;;;;
 ;; World Map functions go here
@@ -1033,7 +1058,7 @@ CheckA:
         STA ButtonFlag
        ; Any behaviour can go here and will happen when the button is released
         JSR InputARelease
-        ;JSR ChangePalleteBlack
+        ;JSR ChangePaletteBlack
 CheckB:
 
     LDA buttons 
@@ -1133,7 +1158,7 @@ CheckDown:
 CheckLeft:
     LDA buttons
     AND #%00000010
-    BEQ CheckLeftRelease
+    Bne CheckLeftRelease
     LDA ButtonFlag
     ORA #$40 
     STA ButtonFlag 
@@ -1176,7 +1201,7 @@ InputA:
 RTS 
 
 InputARelease:
-    JSR ChangePalleteOrange
+    JSR ChangePaletteOrange
 RTS
 
 InputB:
@@ -1184,7 +1209,7 @@ InputB:
 RTS
 
 InputBRelease:
-    JSR ChangePalleteBlack
+    JSR ChangePaletteBlack
 RTS
 
 InputStart:
@@ -1384,7 +1409,15 @@ AddNote:
     LDA #$02 ; note type
     STA entities+Entity::type, X
     LDA nextnote
-    STA entities+Entity::spriteno, X 
+    STA entities+Entity::spriteno, X
+    JSR Prng
+    LSR 
+    LSR 
+    LSR 
+    LSR 
+    LSR 
+    LSR 
+    STA entities+Entity::palette, X
     JMP EndNoteSpawn 
 
 EndNoteSpawn:
@@ -1553,6 +1586,13 @@ ProcessEntities: ; TODO change this to a jump pointer  table
     LDX #$00
     ProcessEntitiesLoop:
         LDA entities+Entity::type, X 
+        ;TAY 
+        ;LDA ProcessEntityList, Y 
+        ;STA jumppointer
+        ;LDA ProcessEntityList+1, Y 
+        ;STA jumppointer+1 
+        ;JMP (jumppointer)
+
         CMP #EntityType::PlayerType ; player id
         BEQ ProcessPlayerJump
         CMP #EntityType::Note ; note id
@@ -1634,27 +1674,16 @@ ProcessBButtonJump:
 
     ProcessNote:
         NoteHorizontal:
-        LDA entities+Entity::generalpurpose, X
-        CMP #$10
-        BCS NoteRight
-        NoteLeft:
-            LDY entities+Entity::generalpurpose, X 
-            LDA NoteOffset, Y 
-            SEC 
-            SBC entities+Entity::xpos, X
-            STA entities+Entity::xpos, X
-            JMP NoteReset
-        NoteRight:
-            LDY entities+Entity::generalpurpose, X 
-            LDA NoteOffset, Y 
-            CLC 
-            ADC entities+Entity::xpos, X 
-            STA entities+Entity::xpos, X
-            
-        NoteReset:
-        LDA entities+Entity::generalpurpose, X
-        CMP #$1F
-        BNE :+
+        LDY entities+Entity::generalpurpose, X
+        LDA NoteOffset, Y 
+        CLC 
+        ADC entities+Entity::xpos, X 
+        STA entities+Entity::xpos, X 
+
+        LDA entities+Entity::generalpurpose, X 
+        CMP #$28
+
+        BNE:+ 
         LDA #$00
         STA entities+Entity::generalpurpose, X
         : 
@@ -1685,30 +1714,25 @@ ProcessBButtonJump:
         JMP EntityComplete
 
     ProcessEurydice:
-        LDA facing
-        
-        BEQ :+
-        JMP ProcessEurydiceLeft
-        :
-        LDA entities+Entity::xpos 
-        SBC #$10
-        STA entities+Entity::xpos, X
-        LDA entities+Entity::ypos
-        LDY framecount
-        ADC VerticalWave, Y
-        STA entities+Entity::ypos, X
-        JMP EntityComplete
-
-        ProcessEurydiceLeft:
+        ProcessEurydiceX:
             LDA entities+Entity::xpos
+            SEC 
+            SBC #$10 
+            STA entities+Entity::xpos, X 
+
+        ProcessEurydiceY:
+            LDY entities+Entity::generalpurpose, X 
+            LDA NoteOffset, Y 
             CLC 
-            ADC #$18
-            STA entities+Entity::xpos, X
-            LDA entities+Entity::ypos
-            LDY framecount
-            ADC VerticalWave, Y
+            ADC entities+Entity::ypos, X
             STA entities+Entity::ypos, X
-            JMP EntityComplete
+            TYA 
+            BNE :+
+            LDA #$28 
+            STA entities+Entity::generalpurpose, X
+            :
+            DEC entities+Entity::generalpurpose, X
+    JMP EntityComplete
 
     ProcessNoteStatic:
         LDA entities+Entity::xpos, X
@@ -2076,7 +2100,7 @@ ProcessNoteMem:
     BNE ClearNoteMem
 
 NoteMemCheckComplete:
-JSR ChangePalleteBlack
+JSR ChangePaletteBlack
 
 ClearNoteMem:
     LDA #$00
@@ -2147,41 +2171,41 @@ RTS
 ;;;;;;
 ; Palette functions
 ;;;;;
-ChangePalleteBlack:
+ChangePaletteBlack:
     LDA #< BackGroundPaletteBlack
     STA paletteaddress
     LDA #> BackGroundPaletteBlack
     STA paletteaddress+1
-    JMP UpdatePalleteBuffer
+    JMP UpdatePaletteBuffer
 
-ChangePalleteOrange: 
+ChangePaletteOrange: 
     LDA #< PaletteData
     STA paletteaddress
     LDA #> PaletteData
     STA paletteaddress+1
-    JMP UpdatePalleteBuffer
+    JMP UpdatePaletteBuffer
 
 
-UpdatePalleteBuffer:
+UpdatePaletteBuffer:
     LDA updatebackgroundpaletteflag
     EOR #$01
     STA updatebackgroundpaletteflag
 
     LDY #$00
-    UpdatePalleteBufferLoop:
+    UpdatePaletteBufferLoop:
     LDA (paletteaddress), Y
     STA PaletteBuffer, Y 
     CPY #$20
     BEQ :+
     INY
-    JMP UpdatePalleteBufferLoop
+    JMP UpdatePaletteBufferLoop
     : 
 RTS
 
-UpdatePalleteNMI:
+UpdatePaletteNMI:
     LDA updatebackgroundpaletteflag
     CMP #$01
-    BNE EndUpdatePalleteNMI
+    BNE EndUpdatePaletteNMI
 
 
     LDA #$3F
@@ -2191,7 +2215,7 @@ UpdatePalleteNMI:
 
     LDY #$00
 
-    ;; Increment through the Pallete data and store it into the PPU
+    ;; Increment through the Palette data and store it into the PPU
     LoadPalettesNMI:
         LDA PaletteBuffer, Y
         STA $2007 ; $3F00, $3F01, $3F02 => $3F1F
@@ -2203,7 +2227,7 @@ UpdatePalleteNMI:
         EOR #$01
         STA updatebackgroundpaletteflag
         
-EndUpdatePalleteNMI:
+EndUpdatePaletteNMI:
 RTS    
 
     
@@ -2229,10 +2253,6 @@ OAMBuffer:
         LDY #$00
         LDA #$00
 
-        STA SpriteMem
-        LDA #$02
-        STA SpriteMem+1
-        
        
         
     ; This checks the entity type of the current entity then branches accordingly
@@ -2267,45 +2287,58 @@ OAMBuffer:
         JMP EndSpriteDraw
 
 
+
     ;;;; This branch is to get aroud the limited range of BEQ 
     NoEntityJmp:
         JMP CheckEndSpriteDraw
     DrawPlayerJmp:
-        JMP DrawPlayer
+        JMP DrawFourBlockSprites
     DrawNoteJmp:
-        JMP DrawNote 
+        JMP DrawSingleSprite 
     DrawFireJmp:
-        JMP DrawFire
+        JMP DrawSingleSprite
     DrawPlayerTwoJmp:
-        JMP DrawPlayerTwo
+        JMP DrawFourBlockSprites
     DrawEurydiceJump:
-        JMP DrawEurydice
+        JMP DrawFourBlockSprites
+
     DrawNoteStaticJump:
-        JMP DrawNote
+        JMP DrawSingleSprite
     DrawUpButtonJump:
-        JMP DrawUp
+        JMP DrawSingleSprite
     DrawDownButtonJump:
-        JMP DrawDown
+        JMP DrawSingleSprite
     DrawLeftButtonJump:
-        JMP DrawLeft
+        JMP DrawSingleSprite
     DrawRightButtonJump:
-        JMP DrawRight
+        JMP DrawSingleSprite
     DrawAButtonJump:
-        JMP DrawA
+        JMP DrawSingleSprite
     DrawBButtonJump:
-        JMP DrawB
+        JMP DrawSingleSprite
     ;;;;   
 
-    DrawPlayer:
-        LDA facing 
-        
-        BEQ :+
-        JMP DrawPlayerLeft
-        :
+  
+    DrawSingleSprite:
+        LDA entities+Entity::ypos, X 
+        STA SpriteBuffer,Y 
+        INY 
+        LDA entities+Entity::spriteno, X
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::palette, X
+        STA SpriteBuffer, Y 
+        INY
+        LDA entities+Entity::xpos, X
+        STA SpriteBuffer, Y
+        INY 
+        JMP CheckEndSpriteDraw
+
+    DrawFourBlockSprites: 
         LDA entities+Entity::ypos, X 
         STA SpriteBuffer, Y 
         INY 
-        LDA entities+Entity::spriteno
+        LDA entities+Entity::spriteno, X
         STA SpriteBuffer, Y 
         INY 
         LDA #$00
@@ -2321,7 +2354,7 @@ OAMBuffer:
         LDA entities+Entity::ypos, X 
         STA SpriteBuffer, Y 
         INY 
-        LDA entities+Entity::spriteno
+        LDA entities+Entity::spriteno, X 
         CLC 
         ADC #$01
         STA SpriteBuffer, Y 
@@ -2342,7 +2375,7 @@ OAMBuffer:
         ADC #$08 
         STA SpriteBuffer, Y 
         INY 
-        LDA entities+Entity::spriteno
+        LDA entities+Entity::spriteno, X 
         CLC
         ADC #$02
         STA SpriteBuffer, Y 
@@ -2361,7 +2394,8 @@ OAMBuffer:
         ADC #$08 
         STA SpriteBuffer, Y 
         INY 
-        LDA entities+Entity::spriteno
+        LDA entities+Entity::spriteno, X 
+
         CLC 
         ADC #$03
         STA SpriteBuffer, Y 
@@ -2375,352 +2409,7 @@ OAMBuffer:
         STA SpriteBuffer, Y
         INY
         JMP CheckEndSpriteDraw
-
-        DrawPlayerLeft:
-
-        LDA entities+Entity::ypos, X 
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::spriteno
-        STA SpriteBuffer, Y 
-        INY 
-        LDA #%01000000
-        STA SpriteBuffer, Y
-        INY
-        LDA entities+Entity::xpos, X
-        CLC
-        ADC #$08
-        STA SpriteBuffer, Y
-        INY
-        
-
-        ;Sprite 2
-
-        LDA entities+Entity::ypos, X
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::spriteno
-        CLC 
-        ADC #$01
-        STA SpriteBuffer, Y 
-        INY 
-        LDA #%01000000
-        STA SpriteBuffer, Y 
-        INY
-        LDA entities+Entity::xpos, X
-        STA SpriteBuffer, Y
-        INY
-         
-
-        ;sprite 3
-        LDA entities+Entity::ypos, X
-        ADC #$08 
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::spriteno
-        CLC
-        ADC #$02
-        STA SpriteBuffer, Y 
-        INY 
-        LDA #%01000000
-        STA SpriteBuffer, Y 
-        INY
-        LDA entities+Entity::xpos, X
-        CLC
-        ADC #$08
-        STA SpriteBuffer, Y
-        INY
-        
-
-        ;sprite 4
-        LDA entities+Entity::ypos, X
-        ADC #$08 
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::spriteno
-        CLC 
-        ADC #$03
-        STA SpriteBuffer, Y 
-        INY 
-        LDA #%01000000
-        STA SpriteBuffer, Y 
-        INY
-        LDA entities+Entity::xpos, X
-        STA SpriteBuffer, Y
-        INY
-        JMP CheckEndSpriteDraw 
-
-
-DrawPlayerTwo: ; this is a pallete swap p1 but currently isn't spawned
-
-        LDA entities+Entity::ypos, X 
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::spriteno
-        STA SpriteBuffer, Y 
-        INY 
-        LDA #$01
-        STA SpriteBuffer, Y 
-        INY
-        LDA entities+Entity::xpos, X
-        STA SpriteBuffer, Y
-        INY
-        
-
-        ;Sprite 2 p2
-
-        LDA entities+Entity::ypos, X 
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::spriteno
-        CLC 
-        ADC #$01
-        STA SpriteBuffer, Y 
-        INY 
-        LDA #$01
-        STA SpriteBuffer, Y 
-        INY
-        LDA entities+Entity::xpos, X
-        CLC 
-        ADC #$08
-        STA SpriteBuffer, Y
-        INY
-         
-
-        ;sprite 3 p2
-        LDA entities+Entity::ypos, X
-        CLC 
-        ADC #$08 
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::spriteno
-        CLC
-        ADC #$02
-        STA SpriteBuffer, Y 
-        INY 
-        LDA #$01
-        STA SpriteBuffer, Y 
-        INY
-        LDA entities+Entity::xpos, X
-        STA SpriteBuffer, Y
-        INY
-        
-
-        ;sprite 4 p2
-        LDA entities+Entity::ypos, X
-        CLC 
-        ADC #$08 
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::spriteno
-        CLC 
-        ADC #$03
-        STA SpriteBuffer, Y 
-        INY 
-        LDA #$01
-        STA SpriteBuffer, Y 
-        INY
-        LDA entities+Entity::xpos, X
-        CLC 
-        ADC #$08
-        STA SpriteBuffer, Y
-        INY
-
-        JMP CheckEndSpriteDraw
-
-
-    DrawNote:
-        LDA entities+Entity::ypos, X 
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::spriteno, X
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::palette, X
-        STA SpriteBuffer, Y 
-        INY
-        LDA entities+Entity::xpos, X
-        CLC
-        ADC  #$10
-        STA SpriteBuffer, Y
-        INY 
-        JMP CheckEndSpriteDraw
-
-    DrawFire:
-        LDA entities+Entity::ypos, X
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::spriteno, X
-        STA SpriteBuffer, Y 
-        INY 
-        LDA #$00
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::xpos, X
-        STA SpriteBuffer, Y 
-        INY  
-        JMP CheckEndSpriteDraw
-    
-    DrawEurydice:
-        LDA entities+Entity::ypos, X
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::spriteno, X
-        STA SpriteBuffer, Y 
-        INY 
-        LDA #$01
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::xpos, X
-        STA SpriteBuffer, Y 
-        INY
-
-        LDA entities+Entity::ypos, X
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::spriteno, X
-        CLC 
-        ADC #$01
-        STA SpriteBuffer, Y 
-        INY 
-        LDA #$01
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::xpos, X
-        CLC 
-        ADC #$08
-        STA SpriteBuffer, Y 
-        INY  
-
-        LDA entities+Entity::ypos, X
-        CLC 
-        ADC #$08
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::spriteno, X
-        CLC 
-        ADC #$02
-        STA SpriteBuffer, Y 
-        INY 
-        LDA #$01
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::xpos, X
-        STA SpriteBuffer, Y 
-        INY  
-
-        LDA entities+Entity::ypos, X
-        CLC 
-        ADC #$08
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::spriteno, X
-        CLC 
-        ADC #$03
-        STA SpriteBuffer, Y 
-        INY 
-        LDA #$01
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::xpos, X
-        CLC 
-        ADC #$08
-        STA SpriteBuffer, Y 
-        INY  
-
-
-        JMP CheckEndSpriteDraw    
-
-    DrawUp:
-        LDA entities+Entity::ypos, X 
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::spriteno, X
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::palette, X
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::xpos, X
-        STA SpriteBuffer, Y 
-        INY 
-        JMP CheckEndSpriteDraw
-
-    DrawDown:
-        LDA entities+Entity::ypos, X 
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::spriteno, X
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::palette, X
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::xpos, X
-        STA SpriteBuffer, Y 
-        INY 
-        JMP CheckEndSpriteDraw
-
-    DrawLeft:
-        LDA entities+Entity::ypos, X 
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::spriteno, X
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::palette, X
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::xpos, X
-        STA SpriteBuffer, Y 
-        INY 
-        JMP CheckEndSpriteDraw
-
-    DrawRight:
-        LDA entities+Entity::ypos, X 
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::spriteno, X
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::palette, X
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::xpos, X
-        STA SpriteBuffer, Y 
-        INY 
-        JMP CheckEndSpriteDraw
-    
-    DrawA:
-        LDA entities+Entity::ypos, X 
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::spriteno, X
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::palette, X
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::xpos, X
-        STA SpriteBuffer, Y 
-        INY 
-        JMP CheckEndSpriteDraw
-    
-    DrawB:
-        LDA entities+Entity::ypos, X 
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::spriteno, X
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::palette, X
-        STA SpriteBuffer, Y 
-        INY 
-        LDA entities+Entity::xpos, X
-        STA SpriteBuffer, Y 
-        INY 
-        JMP CheckEndSpriteDraw
-    
+  
     CheckEndSpriteDraw:
         TXA 
         CLC 
@@ -3409,8 +3098,10 @@ WorldData: ; Each row is 32
     .byte $32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32,$32; Overscan blank line
  
 NoteOffset: 
-    .byte $00,$00,$02,$03,$04,$05,$06,$07,$08,$09,$0A,$0B,$0C,$0D,$0F,$0F
-    .byte $0F,$0F,$0D,$0C,$0B,$0A,$09,$08,$07,$06,$05,$04,$03,$02,$00,$00
+    .byte $01,$00,$01,$00,$01,$00,$01,$00,$01,$00,$01,$00,$01,$00,$01,$00,$01
+    .byte $00,$00,$00,$00
+    .byte $FF,$00,$FF,$00,$FF,$00,$FF,$00,$FF,$00,$FF,$00,$FF,$00,$FF,$00,$FF
+    .byte $00,$00,$00,$00
 NoteTable:  
     .word                                                                $07F1, $0780, $0713
     ; A1-B1
@@ -3706,6 +3397,22 @@ song3noise:
     .byte $18, $18 
     .byte Opcodes::InfiniteLoop
     .word song3noise
+
+ProcessEntityList:
+    ;.word SkipEntity
+    .word ProcessPlayer
+    .word ProcessNote
+    .word ProcessFire
+    .word ProcessPlayerTwo
+    .word ProcessEurydice
+    .word ProcessNoteStatic
+    .word ProcessUpButton
+    .word ProcessDownButton
+    .word ProcessLeftButton
+    .word ProcessRightButton
+    .word ProcessAButton
+    .word ProcessBButton
+
 
 MetaTileList:
 .word Blank0 ;0
@@ -4056,7 +3763,7 @@ PillarCircularRight:
 
 CollisionList:
     .byte $00,$01,$01,$01,$01,$01,$01,$01,$01,$00,$00,$01,$01,$00,$00,$00 ;00 -> 0F
-    .byte $01,$00,$01,$01,$01,$01,$01,$01,$00,$00,$01,$01,$01,$01,$00,$00 ;10 -> 1F
+    .byte $01,$00,$00,$01,$01,$01,$01,$01,$00,$00,$01,$01,$01,$01,$00,$00 ;10 -> 1F
     .byte $01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01 ;20 -> 2F
     .byte $01,$01,$00,$01,$01,$00,$01,$00,$00,$01,$01,$01,$01,$01,$01,$01 ;30 -> 3F
 
@@ -4092,21 +3799,21 @@ TestMetaTilesAttributes:
     .byte $AA, $AA, $AA, $AA, $AA, $AA, $AA, $AA
 
 TestMetaTiles1:
-.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $00, $00, $0A, $00, $00, $00, $16, $17, $00, $00, $00, $0A, $00, $00, $00, $00
-.byte $00, $1E, $1F, $00, $0C, $09, $18, $19, $08, $0C, $00, $0B, $00, $00, $00, $00
+.byte $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29
+.byte $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a
+.byte $00, $38, $39, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $38, $39, $00
+.byte $00, $38, $39, $00, $10, $00, $00, $00, $00, $00, $00, $10, $00, $38, $39, $00
+.byte $00, $38, $39, $00, $11, $00, $00, $00, $00, $00, $00, $11, $00, $38, $39, $00
+.byte $00, $38, $39, $0E, $14, $14, $14, $24, $14, $14, $14, $14, $0E, $38, $39, $00
+.byte $00, $38, $39, $0E, $30, $31, $21, $20, $20, $21, $35, $34, $0E, $38, $39, $00
+.byte $00, $38, $39, $0E, $00, $00, $00, $00, $00, $00, $00, $22, $0E, $38, $39, $00
+.byte $00, $38, $39, $0E, $0C, $00, $00, $00, $00, $00, $00, $1C, $0E, $38, $39, $00
+.byte $00, $38, $39, $0E, $10, $00, $16, $17, $00, $00, $00, $10, $0E, $38, $39, $00
+.byte $00, $38, $39, $0E, $11, $0C, $18, $19, $08, $1F, $0C, $11, $0E, $38, $39, $00
 .byte $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15
 .byte $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02
-.byte $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02
-.byte $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02
+.byte $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B
+.byte $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C
 
 
 .segment "VECTORS"      ; This part just defines what labels to go to whenever the nmi or reset is called 
