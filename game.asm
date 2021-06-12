@@ -33,6 +33,7 @@
     AButton = 11
     BButton = 12
     Crystal = 13
+    NESButtons = 14
 .endscope
 
 .scope GameMode
@@ -270,8 +271,8 @@
     ScrollX: .res 1 ;   scroll L/R
     ScrollY: .res 1 ;   scroll u/d
     FlipSprite: .res 1 ; 0 is right, 1 is left, not used atm
-    animation: .res 1 ; unused 
-    XOffset: .res 1 ; unused
+    ScrollLeftInProgress: .res 1 ; unused 
+    ScrollRightInProgress: .res 1 ; unused
     YOffset: .res 1 ; unused  
     moving: .res 1 ;unused
     anioffset: .res 1 ; unused
@@ -667,6 +668,7 @@ JSR ChangePaletteBlack
 JSR ChangePaletteOrange
 jSR SpawnEurydice
 JSR SpawnCrystal
+JSR SpawnNESButtons
 LDA #$17
 JSR SetBackGround
 ;JSR BrightenBackGroundPalette
@@ -837,7 +839,7 @@ DoGameLogic:
     JSR WaveFlip    ; This simply flips between 1 and 0. Used for directional variance
     JSR NoteIndex   ; This changes the note sprite that will spawn
     JSR ReadButtons ; Duh
-    JSR SpawnNote
+    ;JSR SpawnNote
     ;JSR SoundLoad
     ;JSR CollideDown ; Think about moving this together with movement?
     JSR XMovement ; the player movement
@@ -932,16 +934,28 @@ GetMapPosRight:
     STA world
     LDA ScreenList+1, X 
     STA world+1
-    JMP EndGetMapPosRight
+RTS
 
-    EndGetMapPosRight:
+GetMapPosLeft: 
+    LDA mapposindex
+    SEC  
+    SBC #$01 
+    TAX 
+    LDA WorldMap, X 
+    ASL 
+    TAX 
+    LDA ScreenList, X 
+    STA world 
+    LDA ScreenList+1, X 
+    STA world+1 
 RTS
 
 CheckPlayerPosition:
+    CheckRightScroll:
     LDA entities+Entity::xpos 
     CMP #$EF 
-    BCS ScrollRight2 
-    RTS 
+    BCS EndCheckPlayerPosition ; ScrollRight2 
+    JMP CheckLeftScroll
   
     ScrollRight2: 
         LDA allowrightscroll
@@ -953,7 +967,25 @@ CheckPlayerPosition:
 
         LDA #$01 
         STA scrollinprogress
+        STA ScrollRightInProgress
 
+    CheckLeftScroll:
+    LDA entities+Entity::xpos 
+    CMP #$20
+    BCC ScrollLeft2
+    JMP EndCheckPlayerPosition
+
+    ScrollLeft2: 
+        LDA allowleftscroll
+        BEQ :+ 
+        JMP EndCheckPlayerPosition
+        :
+        LDA #$E0 
+        STA entities+Entity::xpos 
+
+        LDA #$01 
+        STA scrollinprogress
+        STA ScrollLeftInProgress
 EndCheckPlayerPosition:
 RTS 
 
@@ -1371,6 +1403,35 @@ RTS
 ;;;;;;
 ; Entity creation
 ;;;;;;
+SpawnNESButtons:
+    LDX #$00
+    SpawnNESButtonsLoop:
+        CPX #TOTALENTITIES
+        BEQ EndNESButtonsSpawn
+
+        LDA entities+Entity::type, X 
+        CMP #EntityType::NoEntity
+        BEQ AddNESButtons
+        TXA 
+        CLC
+        ADC #.sizeof(Entity)
+        TAX 
+        JMP SpawnNESButtonsLoop
+    AddNESButtons:
+        LDA #$17
+        STA entities+Entity::xpos, X
+        LDA #$3B
+        STA entities+Entity::ypos, X
+        LDA #EntityType::NESButtons
+        STA entities+Entity::type, X
+        LDA #$3A
+        STA entities+Entity::spriteno, X
+        LDA #%00000010
+        STA entities+Entity::palette, X
+        JMP EndNESButtonsSpawn
+EndNESButtonsSpawn:
+RTS
+
 SpawnCrystal: 
     LDX #$00
     CrystalLoop:
@@ -1665,6 +1726,8 @@ ProcessEntities: ; TODO change this to a jump pointer  table
         BEQ ProcessBButtonJump
         CMP #EntityType::Crystal
         BEQ ProcessCrystalJump
+        CMP #EntityType::NESButtons
+        BEQ ProcessNESButtonsJump
         JMP SkipEntity
 
     ProcessPlayerJump:
@@ -1693,7 +1756,8 @@ ProcessBButtonJump:
         JMP ProcessBButton
 ProcessCrystalJump:
         JMP ProcessCrystal
-
+ProcessNESButtonsJump:
+    JMP ProcessNESButtons
 
 
 
@@ -1809,6 +1873,8 @@ ProcessCrystalJump:
             :
     JMP EntityComplete
 
+    ProcessNESButtons:
+        JMP EntityComplete
 
     ClearEntity:
         LDA #EntityType::NoEntity
@@ -1886,6 +1952,13 @@ DestroyPlayer: ; unused atm
 RTS 
 
 ScrollSingleScreen:
+    LDA ScrollRightInProgress
+    BNE ScrollSingleScreenRight
+    LDA ScrollLeftInProgress
+    BNE ScrollSingleScreenLeft
+RTS
+
+    ScrollSingleScreenRight:
     LDA ScrollX
     CLC 
     ADC #$10
@@ -1905,6 +1978,21 @@ ScrollSingleScreen:
     STA columnnumber
 RTS 
     
+    ScrollSingleScreenLeft:
+    LDA ScrollX 
+    SEC 
+    SBC #$10 
+    STA ScrollX
+    CLC 
+    ADC #$10 
+    LSR 
+    LSR 
+    LSR 
+    STA columnlow
+    LDA #$20 
+    STA columnhigh
+
+
 ;;;;;;;;;
 ;;Collision madoodles
 ;;;;;;;
@@ -2437,6 +2525,8 @@ OAMBuffer:
         BEQ DrawBButtonJump
         CMP #EntityType::Crystal
         BEQ DrawCrystalJump
+        CMP #EntityType::NESButtons
+        BEQ DrawNESButtonsJump
         JMP EndSpriteDraw
 
 
@@ -2471,7 +2561,8 @@ OAMBuffer:
         JMP DrawSingleSprite
     DrawCrystalJump:
         JMP DrawFourBlockSprites
-    
+    DrawNESButtonsJump:
+        JMP DrawNESButtons
     ;;;;   
 
   
@@ -2565,7 +2656,114 @@ OAMBuffer:
         STA SpriteBuffer, Y
         INY
         JMP CheckEndSpriteDraw
-  
+    
+    DrawNESButtons:
+        LDA entities+Entity::ypos, X 
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::spriteno, X 
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::palette, X 
+        STA SpriteBuffer, Y
+        INY  
+        LDA entities+Entity::xpos,X 
+        STA SpriteBuffer, Y 
+        INY 
+
+        LDA entities+Entity::ypos, X
+        CLC 
+        ADC #$08
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::spriteno, X
+        CLC 
+        ADC #$01 
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::palette, X 
+        STA SpriteBuffer, Y
+        INY 
+        LDA entities+Entity::xpos,X 
+        STA SpriteBuffer, Y 
+        INY
+        
+        LDA entities+Entity::ypos, X 
+        CLC 
+        ADC #$04
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::spriteno, X 
+        CLC 
+        ADC #$02
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::palette, X 
+        STA SpriteBuffer, Y
+        INY  
+        LDA entities+Entity::xpos,X
+        SEC 
+        SBC #$04
+        STA SpriteBuffer, Y 
+        INY
+        
+        LDA entities+Entity::ypos, X
+        CLC 
+        ADC #$04 
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::spriteno, X 
+        CLC 
+        ADC #$03
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::palette, X 
+        STA SpriteBuffer, Y
+        INY  
+        LDA entities+Entity::xpos,X
+        CLC 
+        ADC #$04 
+        STA SpriteBuffer, Y 
+        INY
+        
+        LDA entities+Entity::ypos, X
+        CLC 
+        ADC #$08 
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::spriteno, X 
+        CLC 
+        ADC #$04
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::palette, X 
+        STA SpriteBuffer, Y
+        INY  
+        LDA entities+Entity::xpos,X 
+        CLC 
+        ADC #$26
+        STA SpriteBuffer, Y 
+        INY
+
+        LDA entities+Entity::ypos, X 
+        CLC 
+        ADC #$08
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::spriteno, X 
+        CLC 
+        ADC #$05
+        STA SpriteBuffer, Y 
+        INY 
+        LDA entities+Entity::palette, X 
+        STA SpriteBuffer, Y
+        INY  
+        LDA entities+Entity::xpos,X
+        CLC 
+        ADC #$2F
+        STA SpriteBuffer, Y 
+        INY
+
     CheckEndSpriteDraw:
         TXA 
         CLC 
@@ -3051,6 +3249,13 @@ WriteToTileBuffer:
         :
         RTS
 
+    CheckScrollDirection:
+        LDA ScrollLeftInProgress
+        BNE WriteColumnToBufferLeft
+        LDA ScrollRightInProgress
+        BNE WriteColumnToBuffer
+    RTS 
+
     WriteColumnToBuffer:
         JSR GetMapPosRight
 
@@ -3076,7 +3281,7 @@ WriteToTileBuffer:
         LDX #$1E
     WriteTileLoop:
         LDY #$00
-        LDA (columnaddress), Y ; also use this to write into the collision?
+        LDA (columnaddress), Y 
 
         ASL
         TAY  
@@ -3208,7 +3413,7 @@ SoundData:
 
 WorldMap: ; read into this index to get screendata and when not to scroll further
     .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF 
-    .byte $FF, $00, $01, $01, $00, $00, $01, $FF
+    .byte $FF, $01, $01, $02, $00, $01, $00, $FF
     .byte $FF, $06, $07, $08, $09, $0A, $0B, $FF
     .byte $FF, $0C, $0D, $0E, $0F, $10, $11, $FF
     .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
@@ -3639,11 +3844,17 @@ MetaTileList:
 .word Controller1 ;3D
 .word Controller2
 .word Controller3 
-.word Controller4 
-.word Controller5 
+.word Controller4 ;40
+.word Controller5 ;41
 .word Controller6 
 .word Controller7 
 .word Controller8
+.word Bridge1 ;45
+.word Bridge2
+.word BridgePillar1
+.word BridgePillar2Blank
+.word BridgePillar2Vine1
+.word BridgePillar2Vine2
 ; 4x4 tile definitions
 Blank0:
     .byte $24, $24 ; pattern tabl
@@ -3964,17 +4175,40 @@ Controller5:
     .byte $B0, $B3 
     
 Controller6:
-    .byte $C7, $B8
-    .byte $B4, $C0 
+    .byte $C9, $B8
+    .byte $CD, $C0 
     
 Controller7:
-    .byte $B9, $C6
-    .byte $C1, $B5 
+    .byte $B9, $C8
+    .byte $C1, $CC
     
 Controller8:
-    .byte $27, $24
+    .byte $27, $C3
     .byte $B3, $C5 
 
+Bridge1:
+    .byte $CE, $CF
+    .byte $24, $24 
+ 
+Bridge2:
+    .byte $D4, $D5
+    .byte $D6, $24 
+
+BridgePillar1:
+    .byte $27, $C3
+    .byte $B3, $C5 
+
+BridgePillar2Blank:
+    .byte $D6, $24
+    .byte $D6, $24 
+
+BridgePillar2Vine1:
+    .byte $D0, $62
+    .byte $D1, $24
+
+BridgePillar2Vine2:
+    .byte $D2, $24
+    .byte $D3, $64 
 
 CollisionList:
     .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$02,$02,$02 ;00 -> 0F
@@ -4029,27 +4263,27 @@ TestMetaTiles1:
 .byte $00, $38, $39, $0E, $0C, $00, $00, $00, $00, $00, $00, $1C, $0E, $38, $39, $00
 .byte $00, $38, $39, $0E, $10, $00, $16, $17, $00, $00, $00, $10, $0E, $38, $39, $00
 .byte $00, $38, $39, $0E, $11, $0C, $18, $19, $08, $1F, $0C, $11, $0E, $38, $39, $00
-.byte $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15
-.byte $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02
-.byte $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B
-.byte $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C
+.byte $15, $15, $15, $0E, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15, $15
+.byte $02, $02, $02, $0E, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02
+.byte $2B, $2D, $2F, $0E, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B
+.byte $2C, $2E, $30, $0E, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C
 
 TestMetaTiles2:
-.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29
+.byte $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a
 .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
 .byte $00, $3D, $3E, $3F, $40, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
 .byte $00, $41, $42, $43, $44, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
 .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
 .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
 .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $0E, $46, $46, $46, $46, $46, $46, $46, $46, $46, $46, $46, $46, $46, $46, $46
+.byte $0E, $49, $48, $48, $48, $48, $48, $48, $48, $48, $48, $48, $48, $48, $48, $48
+.byte $0E, $4A, $48, $48, $48, $48, $48, $48, $48, $48, $48, $48, $48, $48, $48, $48
+.byte $0E, $48, $48, $48, $48, $48, $48, $48, $48, $48, $48, $48, $48, $48, $48, $48
+.byte $0E, $49, $48, $48, $48, $48, $48, $48, $48, $48, $48, $48, $48, $48, $48, $48
+.byte $0E, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B
+.byte $0E, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C
 
 
 .segment "VECTORS"      ; This part just defines what labels to go to whenever the nmi or reset is called 
