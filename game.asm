@@ -32,6 +32,7 @@
     RightButton = 10
     AButton = 11
     BButton = 12
+    Crystal = 13
 .endscope
 
 .scope GameMode
@@ -345,6 +346,7 @@
     currentbank: .res 1
     collisionoffset: .res 1
     scrollinprogress: .res 1
+    collisionflags: .res 1 ;
 ;; This tells the nes what to do when it starts up
 ;; We basically disable most things initially and initialise some others
 
@@ -455,11 +457,19 @@ CLEARENTITIES:
 
 ;; Increment through the Palette data and store it into the PPU
 LoadPalettes:
-    LDA PaletteData, X
-    STA $2007 ; $3F00, $3F01, $3F02 => $3F1F
-    INX
-    CPX #$20
-    BNE LoadPalettes    
+    FillPaletteRam:
+        LDA PaletteData, X
+        STA CurrentBackgroundPalette, X 
+        INX 
+        CPX #$20 
+        BNE FillPaletteRam
+        LDX #$00 
+    LoadtoPPU:
+        LDA CurrentBackgroundPalette, X 
+        STA $2007 ; $3F00, $3F01, $3F02 => $3F1F
+        INX
+        CPX #$20
+        BNE LoadtoPPU    
  
 SetMirroring: ; Doesn't work atm? Not sure if the mapper is incorrectly set up
     ;LDA #$80
@@ -559,7 +569,8 @@ InitSeed:
 ; Sprite buffer takes 4x64 = 256 bytes
 SpriteBuffer = $0200 ;$0200 -> $02FF
 TileBuffer = $0300 ; $0300 -> 031F
-PaletteBuffer = $0320 ; 03320 ->033F 
+PaletteBufferBackground = $0320 ; 03320 ->032F
+PaletteBufferSprites =  $0330 ; -> 033f
 ApuBuffer = $0340 ; 0340 -> 034F
 streamcurrentsound = $0350 ; 0350 -> 0355
 streamstatus = $0356 ; 0356 -> 035B 
@@ -578,8 +589,10 @@ streamvolumeenvelopeindex = $039E ; -> 03A3
 streamloop1 = $03A4 ; -> 03A9
 streamnoteoffset = $03AA ; -> 03AF 
 TileBuffer2 = $03B0 ; -> 03CF
-CollisionMap = $03D0 ; -> 04D0 240 bytes
+CollisionMap = $03D0 ; -> 04BF 240 bytes
 NoteInputMem = $0400 ; dont delete this 
+CurrentBackgroundPalette = $04C0 ; -> 04CF
+CurrentSpritePalette = $03F0
 
 FillTileBuffer:
 LDA #$22
@@ -599,7 +612,7 @@ LDA #$10
 STA ScrollXEight
 
 ;Set movespeed
-LDA #$00
+LDA #$FF
 STA dxhigh
 LDA #$00
 STA dxlow  
@@ -653,7 +666,11 @@ JSR ChangePaletteBlack
 ;JSR SpawnFourNotes
 JSR ChangePaletteOrange
 jSR SpawnEurydice
-
+JSR SpawnCrystal
+LDA #$17
+JSR SetBackGround
+;JSR BrightenBackGroundPalette
+;JSR BrightenSpritePalette
 ; Enable interrupts
     CLI
 
@@ -1158,7 +1175,7 @@ CheckDown:
 CheckLeft:
     LDA buttons
     AND #%00000010
-    Bne CheckLeftRelease
+    BEQ CheckLeftRelease
     LDA ButtonFlag
     ORA #$40 
     STA ButtonFlag 
@@ -1354,6 +1371,35 @@ RTS
 ;;;;;;
 ; Entity creation
 ;;;;;;
+SpawnCrystal: 
+    LDX #$00
+    CrystalLoop:
+        CPX #TOTALENTITIES
+        BEQ EndCrystalSpawn
+
+        LDA entities+Entity::type, X 
+        CMP #EntityType::NoEntity
+        BEQ AddCrystal
+        TXA 
+        CLC
+        ADC #.sizeof(Entity)
+        TAX 
+        JMP CrystalLoop
+    AddCrystal:
+        LDA #$77
+        STA entities+Entity::xpos, X
+        LDA #$4D 
+        STA entities+Entity::ypos, X
+        LDA #EntityType::Crystal
+        STA entities+Entity::type, X
+        LDA #$40
+        STA entities+Entity::spriteno, X
+        LDA #%00100001
+        STA entities+Entity::palette, X
+        JMP EndCrystalSpawn
+EndCrystalSpawn:
+RTS
+
 SpawnEurydice:
     LDX #$00
     EurydiceLoop:
@@ -1617,6 +1663,8 @@ ProcessEntities: ; TODO change this to a jump pointer  table
         BEQ ProcessAButtonJump
         CMP #EntityType::BButton
         BEQ ProcessBButtonJump
+        CMP #EntityType::Crystal
+        BEQ ProcessCrystalJump
         JMP SkipEntity
 
     ProcessPlayerJump:
@@ -1643,6 +1691,8 @@ ProcessAButtonJump:
         JMP ProcessAButton
 ProcessBButtonJump:
         JMP ProcessBButton
+ProcessCrystalJump:
+        JMP ProcessCrystal
 
 
 
@@ -1740,6 +1790,25 @@ ProcessBButtonJump:
         ADC #$00
         STA entities+Entity::xpos, X
         JMP EntityComplete
+
+    ProcessCrystal:
+        ProcessCrystalY:
+            LDA fifteenframe
+            BNE :++
+            LDY entities+Entity::generalpurpose, X 
+            LDA CrystalOffset, Y 
+            CLC 
+            ADC entities+Entity::ypos, X
+            STA entities+Entity::ypos, X
+            TYA 
+            BNE :+
+            LDA #$0E
+            STA entities+Entity::generalpurpose, X
+            :
+            DEC entities+Entity::generalpurpose, X
+            :
+    JMP EntityComplete
+
 
     ClearEntity:
         LDA #EntityType::NoEntity
@@ -1938,7 +2007,7 @@ CollideTestUp:
     ADC temp
     TAY 
     LDA CollisionMap, Y 
-    JMP CollideResult
+    JMP CollideResultY
 
 CollideTestDown:
     LDA entities+Entity::xpos
@@ -1965,9 +2034,27 @@ CollideTestDown:
     ADC temp
     TAY 
     LDA CollisionMap, Y 
-    JMP CollideResult
+    JMP CollideResultY
 CollideResult: 
+    CMP #$01 
+    BEQ :+
+    LDA #$00
+    STA return
+RTS
+    :
+    LDA #$01 
     STA return 
+RTS  
+
+CollideResultY:
+    CMP #$02 
+    BEQ :+
+    LDA #$01
+    STA return
+RTS 
+    :
+    LDA #$00
+    STA return
 RTS  
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2002,6 +2089,7 @@ XMovement:
     
     LimitXLeft:
         JSR ApplyFriction
+        BCS AddDx ; stop a problem where dx goes positive then flips back to -2
         LDA dxhigh
         CMP #$FE 
         BCS :+
@@ -2194,12 +2282,75 @@ UpdatePaletteBuffer:
     LDY #$00
     UpdatePaletteBufferLoop:
     LDA (paletteaddress), Y
-    STA PaletteBuffer, Y 
+    STA PaletteBufferBackground, Y 
     CPY #$20
     BEQ :+
     INY
     JMP UpdatePaletteBufferLoop
     : 
+RTS
+
+DarkenBackGroundPalette:
+    LDX #$00
+    DarkenBackGroundPaletteLoop:
+        LDA PaletteBufferBackground, X 
+        SEC 
+        SBC #$10 
+        BPL :+ 
+        LDA #$0F
+        :
+        STA PaletteBufferBackground, X 
+        INX 
+        CPX #$10
+        BNE DarkenBackGroundPaletteLoop
+EndDarkenBackGroundPalette:
+    LDA #$01 
+    STA updatebackgroundpaletteflag
+RTS 
+
+SetBackGround: ; Sets background to val of A
+    STA PaletteBufferBackground
+    STA PaletteBufferSprites
+
+    LDA #$01 
+    STA updatebackgroundpaletteflag
+RTS 
+
+BrightenBackGroundPalette:
+    LDX #$00
+    BrightenBackGroundPaletteLoop:
+        LDA PaletteBufferBackground, X 
+        CLC
+        ADC #$10 
+        BPL :+ 
+        LDA #$0F
+        :
+        STA PaletteBufferBackground, X 
+        INX 
+        CPX #$10
+        BNE BrightenBackGroundPaletteLoop
+EndBrightenBackGroundPalette:
+    LDA #$01 
+    STA updatebackgroundpaletteflag
+RTS
+
+
+BrightenSpritePalette:
+    LDX #$00
+    BrightenSpritePaletteLoop:
+        LDA PaletteBufferSprites, X 
+        CLC
+        ADC #$10 
+        BPL :+ 
+        LDA #$0F
+        :
+        STA PaletteBufferSprites, X 
+        INX 
+        CPX #$10
+        BNE BrightenSpritePaletteLoop
+EndBrightenSpritePalette:
+    LDA #$01 
+    STA updatebackgroundpaletteflag
 RTS
 
 UpdatePaletteNMI:
@@ -2217,7 +2368,7 @@ UpdatePaletteNMI:
 
     ;; Increment through the Palette data and store it into the PPU
     LoadPalettesNMI:
-        LDA PaletteBuffer, Y
+        LDA PaletteBufferBackground, Y
         STA $2007 ; $3F00, $3F01, $3F02 => $3F1F
         INY
         CPY #$20
@@ -2284,6 +2435,8 @@ OAMBuffer:
         BEQ DrawAButtonJump
         CMP #EntityType::BButton
         BEQ DrawBButtonJump
+        CMP #EntityType::Crystal
+        BEQ DrawCrystalJump
         JMP EndSpriteDraw
 
 
@@ -2316,6 +2469,9 @@ OAMBuffer:
         JMP DrawSingleSprite
     DrawBButtonJump:
         JMP DrawSingleSprite
+    DrawCrystalJump:
+        JMP DrawFourBlockSprites
+    
     ;;;;   
 
   
@@ -2341,7 +2497,7 @@ OAMBuffer:
         LDA entities+Entity::spriteno, X
         STA SpriteBuffer, Y 
         INY 
-        LDA #$00
+        LDA entities+Entity::palette, X
         STA SpriteBuffer, Y
         INY
         LDA entities+Entity::xpos, X
@@ -2359,7 +2515,7 @@ OAMBuffer:
         ADC #$01
         STA SpriteBuffer, Y 
         INY 
-        LDA #$00
+        LDA entities+Entity::palette, X
         STA SpriteBuffer, Y 
         INY
         LDA entities+Entity::xpos, X
@@ -2380,7 +2536,7 @@ OAMBuffer:
         ADC #$02
         STA SpriteBuffer, Y 
         INY 
-        LDA #$00
+        LDA entities+Entity::palette, X
         STA SpriteBuffer, Y 
         INY
         LDA entities+Entity::xpos, X
@@ -2400,7 +2556,7 @@ OAMBuffer:
         ADC #$03
         STA SpriteBuffer, Y 
         INY 
-        LDA #$00
+        LDA entities+Entity::palette, X
         STA SpriteBuffer, Y 
         INY
         LDA entities+Entity::xpos, X
@@ -3052,7 +3208,7 @@ SoundData:
 
 WorldMap: ; read into this index to get screendata and when not to scroll further
     .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF 
-    .byte $FF, $01, $00, $01, $00, $01, $00, $FF
+    .byte $FF, $00, $01, $01, $00, $00, $01, $FF
     .byte $FF, $06, $07, $08, $09, $0A, $0B, $FF
     .byte $FF, $0C, $0D, $0E, $0F, $10, $11, $FF
     .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
@@ -3102,6 +3258,10 @@ NoteOffset:
     .byte $00,$00,$00,$00
     .byte $FF,$00,$FF,$00,$FF,$00,$FF,$00,$FF,$00,$FF,$00,$FF,$00,$FF,$00,$FF
     .byte $00,$00,$00,$00
+
+CrystalOffset:
+    .byte $01,$01,$01,$01,$00,$00,$00,$FF,$FF,$FF,$FF,$00,$00,$00
+
 NoteTable:  
     .word                                                                $07F1, $0780, $0713
     ; A1-B1
@@ -3473,7 +3633,17 @@ MetaTileList:
 .word Rain2
 .word PillarCircularLeft
 .word PillarCircularRight
-
+.word PillarHollowLeft ;3A
+.word PillarHollowRight 
+.word ArchMiddle
+.word Controller1 ;3D
+.word Controller2
+.word Controller3 
+.word Controller4 
+.word Controller5 
+.word Controller6 
+.word Controller7 
+.word Controller8
 ; 4x4 tile definitions
 Blank0:
     .byte $24, $24 ; pattern tabl
@@ -3603,12 +3773,12 @@ ArchTopRight:
 
 ArchBottomLeft:
     .byte $9B, $9C
-    .byte $AB, $AC 
+    .byte $AB, $24 
     .byte $01     
 
 ArchBottomRight:
     .byte $9D, $9E
-    .byte $AD, $AE 
+    .byte $24, $AE 
     .byte $01     
 
 TorchRight:
@@ -3761,23 +3931,72 @@ PillarCircularRight:
     .byte $5D, $5E
     .byte $5D, $5E
 
+PillarHollowLeft:
+    .byte $5D, $5E
+    .byte $5D, $5E
+
+PillarHollowRight:
+    .byte $5D, $5E
+    .byte $5D, $5E
+
+ArchMiddle:
+    .byte $AC, $AC
+    .byte $24, $24
+
+Controller1:
+    .byte $24, $24
+    .byte $B4, $B5 
+
+Controller2:
+    .byte $24, $24
+    .byte $C7, $B6 
+    
+Controller3:
+    .byte $24, $24
+    .byte $B6, $C6
+    
+Controller4:
+    .byte $24, $24
+    .byte $b5, $c3 
+    
+Controller5:
+    .byte $B2, $27
+    .byte $B0, $B3 
+    
+Controller6:
+    .byte $C7, $B8
+    .byte $B4, $C0 
+    
+Controller7:
+    .byte $B9, $C6
+    .byte $C1, $B5 
+    
+Controller8:
+    .byte $27, $24
+    .byte $B3, $C5 
+
+
 CollisionList:
-    .byte $00,$01,$01,$01,$01,$01,$01,$01,$01,$00,$00,$01,$01,$00,$00,$00 ;00 -> 0F
-    .byte $01,$00,$00,$01,$01,$01,$01,$01,$00,$00,$01,$01,$01,$01,$00,$00 ;10 -> 1F
-    .byte $01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01,$01 ;20 -> 2F
-    .byte $01,$01,$00,$01,$01,$00,$01,$00,$00,$01,$01,$01,$01,$01,$01,$01 ;30 -> 3F
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$02,$02,$02 ;00 -> 0F
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ;10 -> 1F
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ;20 -> 2F
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ;30 -> 3F
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ;30 -> 3F
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ;30 -> 3F
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ;30 -> 3F
 
 ScreenList:
 .word TestMetaTiles
 .word TestMetaTiles1
+.word TestMetaTiles2
 
 TestMetaTiles:
 .byte $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29
-.byte $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A
-.byte $10, $33, $33, $33, $33, $38, $39, $33, $38, $39, $33, $33, $33, $33, $33, $33
-.byte $13, $33, $33, $33, $33, $38, $39, $33, $38, $39, $33, $33, $33, $33, $33, $33
-.byte $13, $33, $33, $33, $33, $38, $39, $00, $38, $39, $00, $00, $00, $00, $00, $00
-.byte $11, $33, $33, $1E, $00, $38, $39, $1F, $38, $39, $1F, $00, $00, $33, $00, $00
+.byte $3d, $3e, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A
+.byte $10, $33, $33, $33, $33, $38, $39, $38, $39, $38, $39, $33, $33, $33, $33, $33
+.byte $13, $33, $33, $33, $33, $38, $39, $38, $39, $38, $39, $33, $33, $33, $33, $33
+.byte $13, $33, $33, $33, $33, $38, $39, $16, $17, $38, $39, $00, $00, $00, $00, $00
+.byte $11, $33, $33, $1E, $1B, $38, $39, $18, $19, $38, $39, $1C, $00, $33, $00, $00
 .byte $15, $0E, $15, $15, $15, $15, $15, $15, $15, $15, $15, $0E, $15, $00, $00, $00
 .byte $10, $0E, $33, $00, $00, $00, $00, $00, $00, $10, $00, $0E, $00, $00, $00, $00
 .byte $12, $0E, $33, $00, $00, $25, $25, $25, $25, $11, $00, $0E, $00, $00, $00, $00
@@ -3814,6 +4033,23 @@ TestMetaTiles1:
 .byte $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02, $02
 .byte $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B
 .byte $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C
+
+TestMetaTiles2:
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $3D, $3E, $3F, $40, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $41, $42, $43, $44, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+.byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
 
 
 .segment "VECTORS"      ; This part just defines what labels to go to whenever the nmi or reset is called 
