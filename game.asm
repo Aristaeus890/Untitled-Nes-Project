@@ -270,11 +270,10 @@
     twocount: .res 1   ; flips every frame
     ScrollX: .res 1 ;   scroll L/R
     ScrollY: .res 1 ;   scroll u/d
-    FlipSprite: .res 1 ; 0 is right, 1 is left, not used atm
-    ScrollLeftInProgress: .res 1 ; unused 
-    ScrollRightInProgress: .res 1 ; unused
-    YOffset: .res 1 ; unused  
-    moving: .res 1 ;unused
+    loadattributeflag: .res 1 ; 0 is right, 1 is left, not used atm
+    ScrollLeftInProgress: .res 1 
+    ScrollRightInProgress: .res 1 
+    attributeaddress: .res 2 
     anioffset: .res 1 ; unused
     facing: .res 1 ; player facing direction determines sprite
     facingframe: .res 1 ; unused?
@@ -282,7 +281,7 @@
     mapposindex: .res 1 ; unused
    ;NB DO NOT DELETE ANY OF THESE EVEN IF THEY AREN'T BEING USED IT WILL MESS UP THE ENTITY HANDLER ATM
 
-    MAXENTITIES =10
+    MAXENTITIES =20
      ; max allowed number of entities
     entities: .res .sizeof(Entity) * MAXENTITIES 
     TOTALENTITIES = .sizeof(Entity) * MAXENTITIES
@@ -536,7 +535,7 @@ SetAttributes:
     LDA #$C0
     STA $2006
     AttributeLoop:
-    LDA TestMetaTilesAttributes, X 
+    LDA AttributesDock, X 
     STA $2007
     INX
     CPX #$40
@@ -624,6 +623,8 @@ STA pageY
 LDA #$00
 STA pageX
 
+; Reset the nametable address 
+
 ; Enable the apu
 JSR SoundInit
 LDA #$00 ; load song #x
@@ -658,9 +659,9 @@ STA $A000
 
 JSR CheckWorldMapRight
 
-LDA #<TestMetaTiles
+LDA #<LevelScreenDock
 STA world
-LDA #>TestMetaTiles
+LDA #>LevelScreenDock+1
 STA world+1
 
 JSR ChangePaletteBlack
@@ -728,6 +729,7 @@ MAINLOOP:
     JSR ReadSprites ; Get the sprites from the sprite buffer and write them to the ppu  
     JSR ReadScroll  ; Send the current scroll to the ppu
     JSR UpdatePaletteNMI
+    ;J SR LoadAttributesNMI
 
     LDA #%10010000
     ORA currenttable
@@ -824,8 +826,45 @@ DrawColumnNMI:
     BNE DrawColumnNMILoop2
 RTS
 
+    SendColumnToPPUHorizontal:
+    LDA $2002
+    LDA columnhigh
+    STA $2006
+    LDA columnlow
+    STA $2006 
 
+LoadAttributesNMI:
+    LDA loadattributeflag
+    BNE :+ 
+    RTS 
+    :
+    LDA $2002
+    LDA #$23 
+    STA $2006 
+    LDA #$C0 
+    STA $2006
 
+    LDA mapposindex
+    CLC 
+    ADC #$01 
+    TAX 
+    LDA WorldMap, X 
+    ASL 
+    TAX 
+    LDA AttributeList, X
+    STA world 
+    LDA AttributeList+1, X 
+    STA world+1 
+    LDY #$00 
+    LoadAttributesNMILoop: 
+        LDA (world), Y
+        STA $2007 
+        INY 
+        CPY #$40 
+        BNE LoadAttributesNMILoop  
+        LDA #$00
+        STA loadattributeflag
+RTS 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;
@@ -842,9 +881,7 @@ DoGameLogic:
     JSR WaveFlip    ; This simply flips between 1 and 0. Used for directional variance
     JSR NoteIndex   ; This changes the note sprite that will spawn
     JSR ReadButtons ; Duh
-    ;JSR SpawnNote
-    ;JSR SoundLoad
-    ;JSR CollideDown ; Think about moving this together with movement?
+    JSR SpawnNote
     JSR XMovement ; the player movement
     JSR PlayerBoundary
     JSR ProcessEntities ; entity behaviour is handled here, the player has some special stuff elsewhere
@@ -1240,7 +1277,7 @@ CheckRight:
 
     LDA buttons
     AND #%00000001
-    BEQ CheckRightRelease
+    Bne CheckRightRelease
     LDA ButtonFlag 
     ORA #$80 
     STA ButtonFlag
@@ -1707,78 +1744,14 @@ RTS
 ProcessEntities: ; TODO change this to a jump pointer  table 
     LDX #$00
     ProcessEntitiesLoop:
-        LDA entities+Entity::type, X 
-        ;TAY 
-        ;LDA ProcessEntityList, Y 
-        ;STA jumppointer
-        ;LDA ProcessEntityList+1, Y 
-        ;STA jumppointer+1 
-        ;JMP (jumppointer)
-
-        CMP #EntityType::PlayerType ; player id
-        BEQ ProcessPlayerJump
-        CMP #EntityType::Note ; note id
-        BEQ ProcessNoteJump
-        CMP #EntityType::Fireball
-        BEQ ProcessFireJump
-        CMP #EntityType::PlayerTwoType
-        BEQ ProcessPlayerTwoJump
-        CMP #EntityType::Eurydice
-        BEQ ProcessEurydiceJump
-        CMP #EntityType::NoteStatic
-        BEQ ProcessNoteStaticJump
-        CMP #EntityType::UpButton
-        BEQ ProcessUpButtonJump
-        CMP #EntityType::DownButton
-        BEQ ProcessDownButtonJump
-        CMP #EntityType::LeftButton
-        BEQ ProcessLeftButtonJump
-        CMP #EntityType::RightButton
-        BEQ ProcessRightJump
-        CMP #EntityType::AButton
-        BEQ ProcessAButtonJump
-        CMP #EntityType::BButton
-        BEQ ProcessBButtonJump
-        CMP #EntityType::Crystal
-        BEQ ProcessCrystalJump
-        CMP #EntityType::NESButtons
-        BEQ ProcessNESButtonsJump
-        JMP SkipEntity
-
-    ProcessPlayerJump:
-        JMP ProcessPlayer
-    ProcessNoteJump:
-        JMP ProcessNote
-    ProcessFireJump:
-        JMP ProcessFire
-    ProcessPlayerTwoJump:
-        JMP ProcessPlayerTwo
-ProcessEurydiceJump:
-        JMP ProcessEurydice
-ProcessNoteStaticJump:
-        JMP ProcessNoteStatic
-ProcessUpButtonJump:
-        JMP ProcessUpButton
-ProcessDownButtonJump:
-        JMP ProcessDownButton
-ProcessLeftButtonJump:
-        JMP ProcessLeftButton
-ProcessRightJump:
-        JMP ProcessRightButton
-ProcessAButtonJump:
-        JMP ProcessAButton
-ProcessBButtonJump:
-        JMP ProcessBButton
-ProcessCrystalJump:
-        JMP ProcessCrystal
-ProcessNESButtonsJump:
-    JMP ProcessNESButtons
-
-
-
-
-
-
+        LDA entities+Entity::type, X
+        ASL 
+        TAY  
+        LDA ProcessEntityList, Y 
+        STA jumppointer
+        LDA ProcessEntityList+1, Y 
+        STA jumppointer+1 
+        JMP (jumppointer)
 
     ProcessPlayer:
         JMP EntityComplete
@@ -2537,75 +2510,16 @@ OAMBuffer:
         
     ; This checks the entity type of the current entity then branches accordingly
     DrawSprites:
+        STY temp
         LDA entities+Entity::type, X 
-        CMP #EntityType::NoEntity
-        BEQ NoEntityJmp
-        CMP #EntityType::PlayerType
-        BEQ DrawPlayerJmp
-        CMP #EntityType::Note
-        BEQ DrawNoteJmp
-        CMP #EntityType::Fireball
-        BEQ DrawFireJmp
-        CMP #$04
-        BEQ DrawPlayerTwoJmp
-        CMP #EntityType::Eurydice
-        BEQ DrawEurydiceJump
-        CMP #EntityType::NoteStatic
-        BEQ DrawNoteStaticJump
-        CMP #EntityType::UpButton
-        BEQ DrawUpButtonJump
-        CMP #EntityType::DownButton
-        BEQ DrawDownButtonJump
-        CMP #EntityType::LeftButton
-        BEQ DrawLeftButtonJump
-        CMP #EntityType::RightButton
-        BEQ DrawRightButtonJump
-        CMP #EntityType::AButton
-        BEQ DrawAButtonJump
-        CMP #EntityType::BButton
-        BEQ DrawBButtonJump
-        CMP #EntityType::Crystal
-        BEQ DrawCrystalJump
-        CMP #EntityType::NESButtons
-        BEQ DrawNESButtonsJump
-        JMP EndSpriteDraw
-
-
-
-    ;;;; This branch is to get aroud the limited range of BEQ 
-    NoEntityJmp:
-        JMP CheckEndSpriteDraw
-    DrawPlayerJmp:
-        JMP DrawFourBlockSprites
-    DrawNoteJmp:
-        JMP DrawSingleSprite 
-    DrawFireJmp:
-        JMP DrawSingleSprite
-    DrawPlayerTwoJmp:
-        JMP DrawFourBlockSprites
-    DrawEurydiceJump:
-        JMP DrawFourBlockSprites
-
-    DrawNoteStaticJump:
-        JMP DrawSingleSprite
-    DrawUpButtonJump:
-        JMP DrawSingleSprite
-    DrawDownButtonJump:
-        JMP DrawSingleSprite
-    DrawLeftButtonJump:
-        JMP DrawSingleSprite
-    DrawRightButtonJump:
-        JMP DrawSingleSprite
-    DrawAButtonJump:
-        JMP DrawSingleSprite
-    DrawBButtonJump:
-        JMP DrawSingleSprite
-    DrawCrystalJump:
-        JMP DrawFourBlockSprites
-    DrawNESButtonsJump:
-        JMP DrawNESButtons
-    ;;;;   
-
+        ASL 
+        TAY 
+        LDA DrawSpriteList, Y 
+        STA jumppointer
+        LDA DrawSpriteList+1, Y 
+        STA jumppointer+1
+        LDY temp
+        JMP (jumppointer)
   
     DrawSingleSprite:
         LDA entities+Entity::ypos, X 
@@ -3370,6 +3284,8 @@ WriteToTileBuffer:
         STA ScrollX
         JSR WriteToCollisionMap
         INC pageX
+        LDA #$01 
+        STA loadattributeflag
         
         :
 
@@ -3843,7 +3759,7 @@ song3noise:
     .word song3noise
 
 ProcessEntityList:
-    ;.word SkipEntity
+    .word SkipEntity
     .word ProcessPlayer
     .word ProcessNote
     .word ProcessFire
@@ -3856,6 +3772,25 @@ ProcessEntityList:
     .word ProcessRightButton
     .word ProcessAButton
     .word ProcessBButton
+    .word ProcessCrystal
+    .word ProcessNESButtons
+
+DrawSpriteList:
+    .word CheckEndSpriteDraw
+    .word DrawFourBlockSprites
+    .word DrawSingleSprite
+    .word DrawSingleSprite
+    .word DrawFourBlockSprites
+    .word DrawFourBlockSprites
+    .word DrawSingleSprite
+    .word DrawSingleSprite
+    .word DrawSingleSprite
+    .word DrawSingleSprite
+    .word DrawSingleSprite
+    .word DrawSingleSprite
+    .word DrawSingleSprite
+    .word DrawFourBlockSprites
+    .word DrawNESButtons
 
 
 MetaTileList:
@@ -3933,8 +3868,10 @@ MetaTileList:
 .word BridgePillar1
 .word BridgePillar2Blank
 .word BridgePillar2Vine1
-.word BridgePillar2Vine2
+.word BridgePillar2Vine2;4a
 .word WeaponRack
+.word LightPost
+.word BrickLight
 ; 4x4 tile definitions
 Blank0:
     .byte $24, $24 ; pattern tabl
@@ -4294,6 +4231,15 @@ WeaponRack:
     .byte $28, $29 
     .byte $2A, $2B 
 
+LightPost:
+    .byte $91, $92 
+    .byte $A1, $A2 
+
+BrickLight:
+    .byte $A3, $A4 
+    .byte $A5, $A6 
+
+
 
 CollisionList:
     .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$02,$02,$02 ;00 -> 0F
@@ -4305,11 +4251,16 @@ CollisionList:
     .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ;30 -> 3F
 
 ScreenList:
-.word TestMetaTiles
-.word TestMetaTiles1
-.word TestMetaTiles2
+.word LevelScreenDock
+.word LevelScreenArch
+.word LevelScreenBridge
 
-TestMetaTiles:
+AttributeList: 
+.word AttributesDock
+.word AttributesArch
+.word AttributesBridge 
+
+LevelScreenDock:
 .byte $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29
 .byte $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A, $2A
 .byte $10, $33, $33, $33, $33, $38, $39, $38, $39, $38, $39, $33, $33, $33, $33, $33
@@ -4326,7 +4277,7 @@ TestMetaTiles:
 .byte $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B
 .byte $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C
 
-TestMetaTilesAttributes:
+AttributesDock:
     .byte $55, $55, $55, $55, $55, $55, $55, $55 
     .byte $55, $00, $00, $00, $00, $00, $55, $55
     .byte $55, $00, $00, $00, $00, $00, $55, $55
@@ -4336,7 +4287,7 @@ TestMetaTilesAttributes:
     .byte $AA, $AA, $AA, $AA, $AA, $AA, $AA, $AA
     .byte $AA, $AA, $AA, $AA, $AA, $AA, $AA, $AA
 
-TestMetaTiles1:
+LevelScreenArch:
 .byte $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29
 .byte $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a
 .byte $00, $38, $39, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $38, $39, $00
@@ -4353,7 +4304,7 @@ TestMetaTiles1:
 .byte $2B, $2D, $2F, $0E, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B
 .byte $2C, $2E, $30, $0E, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C
 
-TestMetaTilesAttribute1:
+AttributesArch:
     .byte $55, $55, $55, $55, $55, $55, $55, $55 
     .byte $55, $55, $55, $55, $55, $55, $55, $55
     .byte $55, $55, $55, $55, $55, $55, $55, $55
@@ -4364,7 +4315,7 @@ TestMetaTilesAttribute1:
     .byte $AA, $AA, $AA, $AA, $AA, $AA, $AA, $AA
 
 
-TestMetaTiles2:
+LevelScreenBridge:
 .byte $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29, $29
 .byte $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a, $2a
 .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
@@ -4375,12 +4326,21 @@ TestMetaTiles2:
 .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
 .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
 .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $00, $00, $00, $00, $00, $00, $4B, $4B, $00, $00, $00, $00, $00, $00, $00, $00
-.byte $46, $46, $46, $46, $46, $46, $32, $38, $39, $32, $46, $46, $46, $46, $46, $46
+.byte $00, $4C, $00, $4C, $00, $4C, $4B, $4B, $00, $00, $4C, $00, $4C, $00, $4C, $00
+.byte $45, $45, $45, $45, $45, $45, $32, $38, $39, $32, $45, $45, $45, $45, $45, $45
 .byte $49, $49, $48, $48, $48, $48, $32, $38, $39, $32, $48, $48, $48, $48, $48, $48
 .byte $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B
 .byte $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C
 
+AttributesBridge:
+    .byte $55, $55, $55, $55, $55, $55, $55, $55 
+    .byte $55, $55, $55, $55, $55, $55, $55, $55
+    .byte $55, $55, $55, $55, $55, $55, $55, $55
+    .byte $55, $55, $55, $55, $55, $55, $55, $55
+    .byte $55, $55, $55, $55, $55, $55, $55, $55
+    .byte $55, $55, $55, $55, $55, $55, $55, $55
+    .byte $AA, $AA, $AA, $AA, $AA, $AA, $AA, $AA
+    .byte $AA, $AA, $AA, $AA, $AA, $AA, $AA, $AA
 
 .segment "VECTORS"      ; This part just defines what labels to go to whenever the nmi or reset is called 
     .word NMI           ; If you look at someone elses stuff they probably call this vblank or something
