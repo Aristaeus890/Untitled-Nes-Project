@@ -881,7 +881,7 @@ DoGameLogic:
     JSR WaveFlip    ; This simply flips between 1 and 0. Used for directional variance
     JSR NoteIndex   ; This changes the note sprite that will spawn
     JSR ReadButtons ; Duh
-    JSR SpawnNote
+    ; JSR SpawnNote
     JSR XMovement ; the player movement
     JSR PlayerBoundary
     JSR ProcessEntities ; entity behaviour is handled here, the player has some special stuff elsewhere
@@ -1277,7 +1277,7 @@ CheckRight:
 
     LDA buttons
     AND #%00000001
-    Bne CheckRightRelease
+    BEQ CheckRightRelease
     LDA ButtonFlag 
     ORA #$80 
     STA ButtonFlag
