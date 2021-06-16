@@ -34,6 +34,10 @@
     BButton = 12
     Crystal = 13
     NESButtons = 14
+    Rain = 15
+    Splash = 16
+    RainRight = 17
+    RainLeft = 18
 .endscope
 
 .scope GameMode
@@ -262,8 +266,13 @@
 ;todo: entities currently cant be moved bc references to its abs loc in other places 
 .segment "ZEROPAGE" ; LSB 0 - FF
 ;; Reserve memory for some specific things we need not to be futzed with
-    seed: .res 2 ; unused
-    world: .res 2  ; used during startup, not after that
+    MAXENTITIES =30 ; max allowed number of entities
+    entities: .res .sizeof(Entity) * MAXENTITIES 
+    TOTALENTITIES = .sizeof(Entity) * MAXENTITIES
+
+    seed: .res 2 ; gets inited to anything but 1 
+    world: .res 2  ; used as a pointer to level screens
+    tablepointer: .res 2
     buttons: .res 1 ; used for polling controller
     nmidone: .res 1 ; ppu is done when this is 1 ;
     framecount: .res 1 ;  This will increment once per frame and reset over 59 (0 counts)
@@ -273,29 +282,18 @@
     loadattributeflag: .res 1 ; 0 is right, 1 is left, not used atm
     ScrollLeftInProgress: .res 1 
     ScrollRightInProgress: .res 1 
+    scrollallowedflags: .res 1 
     attributeaddress: .res 2 
-    anioffset: .res 1 ; unused
-    facing: .res 1 ; player facing direction determines sprite
-    facingframe: .res 1 ; unused?
-    playeraddress: .res 2 ; unused
-    mapposindex: .res 1 ; unused
-   ;NB DO NOT DELETE ANY OF THESE EVEN IF THEY AREN'T BEING USED IT WILL MESS UP THE ENTITY HANDLER ATM
-
-    MAXENTITIES =20
-     ; max allowed number of entities
-    entities: .res .sizeof(Entity) * MAXENTITIES 
-    TOTALENTITIES = .sizeof(Entity) * MAXENTITIES
-
+    environmentflags: .res 1 ; 0 = no rain 1 = rain 2 = rain left 4 = rain right
+    mapposindex: .res 1 
     columnhigh: .res 1
     columnlow: .res 1
     columnnumber: .res 1
-    Columnflag: .res 1
-    waveflip: .res 1 ; this is usedfort not movement
     nextnote: .res 1 ; this is an offset that changes the spite of the not every time you create one
     thirtyframe: .res 1 ; resets every 30 frames
     fifteenframe: .res 1 ; resetsevery 15 frames
     ButtonFlag: .res 1 ; used in controls for releasing a held button
-    temp: .res 1 ;
+    temp: .res 1 ; 
     temp2: .res 1 
     boxx1: .res 1   ; collision box stuff
     boxy1: .res 1
@@ -312,8 +310,6 @@
     DrawColumnFlag: .res 1
     DrawColumnLeftFlag: .res 1
     columnaddress: .res 2
-    allowrightscroll: .res 1
-    allowleftscroll: .res 1
     gamemode: .res 1
     noteflag: .res 1
     notecount: .res 1
@@ -325,18 +321,6 @@
     soundframecount: .res 1
     sfxplaying: .res 1
     sfxindex: .res 1
-;    streamcurrentsound: .res 6
-;    streamstatus: .res 6
-;    streamchannel: .res 6
-;    streampointerlow: .res 6
-;    streampointerhigh: .res 6  
-;    streamvolduty: .res 6
-;    streamnotelow: .res 6
-;    streamnotehigh: .res 6
-;    streamtempo: .res 6 
-;    streamtickertotal: .res 6
-;    streamnotelengthcount: .res 6 
-;    streamnotelength: .res 6
     soundpointer: .res 2
     soundtemp1: .res 1
     soundtemp2: .res 1
@@ -344,9 +328,7 @@
     soundsquare2old: .res 1
     jumppointer: .res 2 
     currentbank: .res 1
-    collisionoffset: .res 1
     scrollinprogress: .res 1
-    collisionflags: .res 1 ;
 ;; This tells the nes what to do when it starts up
 ;; We basically disable most things initially and initialise some others
 
@@ -416,7 +398,8 @@ INIT_ENTITIES:
     ;LDA #$10 
     ;STA entities+Entity::spriteno
 
-    LDX #.sizeof(Entity) 
+    ; LDX #.sizeof(Entity)
+    LDX #$00
     LDA #$FF
 
 CLEARENTITIES:
@@ -426,6 +409,7 @@ CLEARENTITIES:
     LDA #$00
     STA entities+Entity::type, X
     STA entities+Entity::palette, X
+    STA entities+Entity::generalpurpose, X 
     LDA #$FF 
     ; NB YOU MUST INX THE SAME AS THE NUMBER OF ENTRIES IN THE 'Entity' STRUCTURE OR EVERYTHING WILL BREAK
     INX
@@ -560,7 +544,7 @@ SetPlayerPos: ; initial player position
     LDA #> WorldData ; take the high byte
     STA columnaddress+1 ; store high into the world address +1 i.e the second byte of the address
 
-InitSeed: 
+InitSeed: ; this can be literally anything as long as it isn't 0
     LDA #$01 
     STA seed 
     STA seed+1
@@ -623,6 +607,10 @@ STA pageY
 LDA #$00
 STA pageX
 
+; init rain 
+LDA #$01 
+STA environmentflags
+
 ; Reset the nametable address 
 
 ; Enable the apu
@@ -667,6 +655,7 @@ STA world+1
 JSR ChangePaletteBlack
 ;JSR SpawnFourNotes
 JSR ChangePaletteOrange
+JSR SpawnPlayer ; Other behaviours rely on this being first in the entity array
 jSR SpawnEurydice
 JSR SpawnCrystal
 JSR SpawnNESButtons
@@ -878,10 +867,9 @@ DoGameLogic:
 
     JSR DoWorldMap
     JSR CheckPlayerPosition 
-    JSR WaveFlip    ; This simply flips between 1 and 0. Used for directional variance
     JSR NoteIndex   ; This changes the note sprite that will spawn
     JSR ReadButtons ; Duh
-    ; JSR SpawnNote
+    JSR SpawnRain
     JSR XMovement ; the player movement
     JSR PlayerBoundary
     JSR ProcessEntities ; entity behaviour is handled here, the player has some special stuff elsewhere
@@ -935,14 +923,16 @@ DoWorldMap:
     LDA WorldMap, X 
     CMP #$FF 
     BNE :+
-    LDA #$01
-    STA allowrightscroll
-    LDA #$00
-    STA ScrollX
+
+    LDA scrollallowedflags
+    ORA  #%00001000
+    STA scrollallowedflags
+
     JMP CheckWorldMapLeft
     :
-    LDA #$00
-    STA allowrightscroll
+    LDA scrollallowedflags
+    EOR #%000001000
+    STA scrollallowedflags
 
     CheckWorldMapLeft:
     LDA mapposindex 
@@ -952,13 +942,55 @@ DoWorldMap:
     LDA WorldMap, X
     CMP #$FF 
     BNE :+
-    LDA #$01
-    STA allowleftscroll
-    JMP EndDoWorldMap
-    :
-    LDA #$00
-    STA allowleftscroll
 
+    LDA scrollallowedflags
+    ORA #%00000100
+    STA scrollallowedflags
+
+    JMP CheckWorldMapUp
+    :
+    LDA scrollallowedflags
+    EOR #%00000100
+    STA scrollallowedflags
+     
+    CheckWorldMapUp:
+        LDA mapposindex 
+        SEC  
+        SBC #$08 ; width of world map
+        TAX 
+        LDA WorldMap, X 
+        CMP #$FF  
+        BNE :+
+
+        LDA scrollallowedflags
+        ORA  #%00000001
+        STA scrollallowedflags
+
+        JMP CheckWorldMapDown
+        : 
+        LDA scrollallowedflags
+        EOR #%00000001 
+        STA scrollallowedflags
+        
+
+    CheckWorldMapDown:
+        LDA mapposindex 
+        SEC  
+        SBC #$08 ; width of world map
+        TAX 
+        LDA WorldMap, X 
+        CMP #$FF  
+        BNE :+ 
+
+        LDA scrollallowedflags
+        ORA  #%00000010
+        STA scrollallowedflags
+
+        JMP EndDoWorldMap
+        : 
+        LDA scrollallowedflags
+        EOR #%00000010
+        STA scrollallowedflags
            
 EndDoWorldMap:
 RTS   
@@ -999,7 +1031,8 @@ CheckPlayerPosition:
     JMP CheckLeftScroll
   
     ScrollRight2: 
-        LDA allowrightscroll
+        LDA scrollallowedflags
+        AND #%00001000
         BEQ :+ 
         JMP EndCheckPlayerPosition
         :
@@ -1020,7 +1053,8 @@ CheckPlayerPosition:
     JMP EndCheckPlayerPosition
 
     ScrollLeft2: 
-        LDA allowleftscroll
+        LDA scrollallowedflags
+        AND #%00000100
         BEQ :+ 
         JMP EndCheckPlayerPosition
         :
@@ -1052,25 +1086,6 @@ ClearSpriteBuffer:
         CPX #$30
         BNE ClearBufferLoop 
     RTS
-
-;This flips a byte back between 1/0
-; I feel like this could be more efficient
-WaveFlip:
-    LDA thirtyframe ; this can be changed. Currently useful with 15,30,60 frame
-    
-    BEQ Flip 
-    JMP EndFlip
-    Flip:
-    INC waveflip
-    LDA waveflip
-    CMP #$02
-    BEQ ResetFlip
-    JMP EndFlip
-    ResetFlip:
-    LDA #$00
-    STA waveflip
-    EndFlip:
-RTS
 
 NoteIndex: ; Change the next note sprite that will be spawned
     INC nextnote
@@ -1308,7 +1323,7 @@ InputB:
 RTS
 
 InputBRelease:
-    JSR ChangePaletteBlack
+    JSR CycleRain
 RTS
 
 InputStart:
@@ -1453,6 +1468,36 @@ RTS
 ;;;;;;
 ; Entity creation
 ;;;;;;
+
+SpawnPlayer:
+    LDX #$00
+    SpawnPlayerLoop:
+        CPX #TOTALENTITIES
+        BEQ EndPlayerSpawn
+
+        LDA entities+Entity::type, X 
+        CMP #EntityType::NoEntity
+        BEQ AddPlayer
+        TXA 
+        CLC
+        ADC #.sizeof(Entity)
+        TAX 
+        JMP SpawnPlayerLoop
+    AddPlayer:
+        LDA #$9F
+        STA entities+Entity::xpos, X
+        LDA #$9F
+        STA entities+Entity::ypos, X
+        LDA #EntityType::PlayerType
+        STA entities+Entity::type, X
+        LDA #$10
+        STA entities+Entity::spriteno, X
+        LDA #%00000000
+        STA entities+Entity::palette, X
+        JMP EndPlayerSpawn
+EndPlayerSpawn:
+RTS
+
 SpawnNESButtons:
     LDX #$00
     SpawnNESButtonsLoop:
@@ -1541,6 +1586,127 @@ SpawnEurydice:
         JMP EndEurydiceSpawn
 EndEurydiceSpawn:
     RTS
+
+SpawnRain:
+    LDA twocount
+    BEQ :+
+    RTS 
+    :
+
+    LDA environmentflags 
+    ASL
+    TAY  
+    LDA RainList, Y
+    STA jumppointer
+    LDA RainList+1, Y 
+    STA jumppointer+1
+    JMP (jumppointer)
+
+
+SpawnRainStraight: 
+    LDX #$00
+
+RainLoop:
+    CPX #TOTALENTITIES ; Check whether we're at the end of allowed entities
+    BEQ EndRainSpawn
+; Checkif the current index has nothing in it   
+    LDA entities+Entity::type, X 
+    CMP #EntityType::NoEntity ; NO TYPE
+    BEQ AddRain
+    TXA 
+    CLC 
+    ADC #.sizeof(Entity) ; This adds to the X index so that we can keep looping through all entity memory
+    TAX
+    JMP RainLoop
+
+AddRain:
+    JSR Prng
+    STA entities+Entity::xpos, X ; set the new entity position
+    LDA #$F9
+    STA entities+Entity::ypos, X
+
+    LDA #EntityType::Rain
+    STA entities+Entity::type, X
+    LDA #$4B
+    STA entities+Entity::spriteno, X
+    LDA #$02
+    STA entities+Entity::palette, X 
+    JMP EndRainSpawn 
+
+EndRainSpawn:
+    RTS
+
+SpawnRainRight:
+    LDX #$00
+
+RainRightLoop:
+    CPX #TOTALENTITIES ; Check whether we're at the end of allowed entities
+    BEQ EndRainRightSpawn
+; Checkif the current index has nothing in it   
+    LDA entities+Entity::type, X 
+    CMP #EntityType::NoEntity ; NO TYPE
+    BEQ AddRainRight
+    TXA 
+    CLC 
+    ADC #.sizeof(Entity) ; This adds to the X index so that we can keep looping through all entity memory
+    TAX
+    JMP RainRightLoop
+
+AddRainRight:
+    JSR Prng
+    STA entities+Entity::xpos, X ; set the new entity position
+    LDA #$F9
+    STA entities+Entity::ypos, X
+    LDA #EntityType::RainRight
+    STA entities+Entity::type, X
+    LDA #$4C
+    STA entities+Entity::spriteno, X
+    LDA #$02
+    STA entities+Entity::palette, X 
+    JMP EndRainSpawn 
+
+EndRainRightSpawn:
+    RTS
+
+
+SpawnRainLeft:
+    LDX #$00
+
+RainLeftLoop:
+    CPX #TOTALENTITIES ; Check whether we're at the end of allowed entities
+    BEQ EndRainLeftSpawn
+; Checkif the current index has nothing in it   
+    LDA entities+Entity::type, X 
+    CMP #EntityType::NoEntity ; NO TYPE
+    BEQ AddRainLeft
+    TXA 
+    CLC 
+    ADC #.sizeof(Entity) ; This adds to the X index so that we can keep looping through all entity memory
+    TAX
+    JMP RainLeftLoop
+
+AddRainLeft:
+    JSR Prng
+    STA entities+Entity::xpos, X ; set the new entity position
+    LDA #$F9
+    STA entities+Entity::ypos, X
+    LDA #EntityType::RainLeft
+    STA entities+Entity::type, X
+    LDA #$4D
+    STA entities+Entity::spriteno, X
+    LDA #$02
+    STA entities+Entity::palette, X 
+    JMP EndRainSpawn 
+
+EndRainLeftSpawn:
+    RTS
+
+SpawnSplash: ; This is only to be called from inside the processing loop
+    LDA #EntityType::Splash
+    STA entities+Entity::type, X 
+    LDA #$48 
+    STA entities+Entity::spriteno, X 
+JMP EntityComplete
 
 SpawnNote:
     LDX #$00
@@ -1798,7 +1964,9 @@ ProcessEntities: ; TODO change this to a jump pointer  table
         STA entities+Entity::ypos, X
         LDA entities+Entity::ypos, X 
         CMP #$FE
-        BNE EntityComplete
+        BEQ :+
+        JMP EntityComplete
+        :
         JMP ClearEntity
 
 
@@ -1809,7 +1977,9 @@ ProcessEntities: ; TODO change this to a jump pointer  table
         STA entities+Entity::xpos, X
         ;JSR PlayerCollide ; turned off for testing, does work
         CMP #$FF
-        BCC EntityComplete ;BCC change
+        BCS :+
+        JMP EntityComplete ;BCC change
+        :
         JMP ClearEntity
 
     ProcessPlayerTwo:
@@ -1824,7 +1994,9 @@ ProcessEntities: ; TODO change this to a jump pointer  table
 
         ProcessEurydiceY:
             LDA fifteenframe
-            BEQ EntityComplete
+            BNE :+
+            JMP EntityComplete
+            :
             LDY entities+Entity::generalpurpose, X 
             LDA NoteOffset, Y 
             CLC 
@@ -1864,6 +2036,57 @@ ProcessEntities: ; TODO change this to a jump pointer  table
     JMP EntityComplete
 
     ProcessNESButtons:
+        JMP EntityComplete
+
+    ProcessRain:
+        LDA entities+Entity::ypos, X  
+        CLC 
+        ADC #08
+        CMP #$AB
+        BCC :+ 
+        JMP SpawnSplash
+        :
+        STA entities+Entity::ypos, X 
+        JMP EntityComplete
+
+    ProcessSplash: 
+        LDA entities+Entity::spriteno, X 
+        CLC 
+        ADC #$01 
+        CMP #$4B
+        BEQ ClearEntity
+        STA entities+Entity::spriteno, X 
+        JMP EntityComplete
+
+    ProcessRainRight:
+        LDA entities+Entity::ypos, X  
+        CLC 
+        ADC #08
+        CMP #$AB
+        BCC :+ 
+        JMP SpawnSplash
+        :
+        STA entities+Entity::ypos, X
+        LDA #$04
+
+        CLC 
+        ADC entities+Entity::xpos, X
+        STA entities+Entity::xpos, X   
+        JMP EntityComplete
+
+    ProcessRainLeft:
+        LDA entities+Entity::ypos, X  
+        CLC 
+        ADC #08
+        CMP #$AB
+        BCC :+ 
+        JMP SpawnSplash
+        :
+        STA entities+Entity::ypos, X
+        LDA entities+Entity::xpos, X
+        SEC 
+        SBC #$04
+        STA entities+Entity::xpos, X   
         JMP EntityComplete
 
     ClearEntity:
@@ -2224,7 +2447,8 @@ RTS
 
 PlayerBoundary: 
     BoundRight:
-        LDA allowrightscroll
+        LDA scrollallowedflags 
+        AND #%00001000
         BEQ BoundLeft
         LDA entities+Entity::xpos 
         CMP #$F8
@@ -2232,7 +2456,8 @@ PlayerBoundary:
         LDA #$F8
         STA entities+Entity::xpos
     BoundLeft:
-        LDA allowleftscroll
+        LDA scrollallowedflags
+        AND #%00000100
         BEQ EndPlayerBoundary
         LDA entities+Entity::xpos 
         CMP #$02
@@ -2357,6 +2582,17 @@ SetBank: ; sets A as the bank to be used
     STA $A000
 RTS 
 
+SetPRGBank: 
+    STA $E000
+    LSR  
+    STA $E000
+    LSR  
+    STA $E000
+    LSR  
+    STA $E000
+    LSR  
+    STA $E000
+RTS
 
 ;;;;;;
 ; Palette functions
@@ -3392,7 +3628,7 @@ VerticalWave:
 
 PaletteData:
     .byte $17,$0C,$00,$0F,  $17,$0A,$00,$0F,  $17,$1C,$0C,$0F, $0F,$06,$04,$0F  ;background palette data  
-    .byte $17,$27,$14,$1A,  $22,$09,$1C,$0C,  $04,$16,$30,$27, $30,$0F,$36,$17  ;sprite palette data
+    .byte $17,$27,$14,$1A,  $22,$09,$1C,$0C,  $04,$2C,$30,$27, $30,$0F,$36,$17  ;sprite palette data
 
 BackGroundPaletteBlack:
     .byte $0F,$00,$0C,$0F,  $0F,$07,$17,$0F,  $0F,$07,$10,$0F, $0F,$14,$15,$16  ;background palette data  
@@ -3774,6 +4010,10 @@ ProcessEntityList:
     .word ProcessBButton
     .word ProcessCrystal
     .word ProcessNESButtons
+    .word ProcessRain
+    .word ProcessSplash 
+    .word ProcessRainRight 
+    .word ProcessRainLeft 
 
 DrawSpriteList:
     .word CheckEndSpriteDraw
@@ -3789,9 +4029,28 @@ DrawSpriteList:
     .word DrawSingleSprite
     .word DrawSingleSprite
     .word DrawSingleSprite
-    .word DrawFourBlockSprites
-    .word DrawNESButtons
+    .word DrawFourBlockSprites ; crystal
+    .word DrawNESButtons ; buttons
+    .word DrawSingleSprite ; rain
+    .word DrawSingleSprite ; splash
+    .word DrawSingleSprite ; rain right 
+    .word DrawSingleSprite ; rain  left
 
+CycleRain:
+    DEC environmentflags
+    LDA environmentflags
+    BMI :+
+    RTS 
+    :
+    LDA #$03 
+    STA environmentflags
+RTS 
+
+RainList:
+    .word EndRainSpawn
+    .word SpawnRainStraight
+    .word SpawnRainLeft
+    .word SpawnRainRight
 
 MetaTileList:
 .word Blank0 ;0
