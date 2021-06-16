@@ -329,6 +329,7 @@
     jumppointer: .res 2 
     currentbank: .res 1
     scrollinprogress: .res 1
+    currentsong: .res 1
 ;; This tells the nes what to do when it starts up
 ;; We basically disable most things initially and initialise some others
 
@@ -1170,9 +1171,7 @@ CheckA:
         LDA ButtonFlag
         EOR #$01 
         STA ButtonFlag
-       ; Any behaviour can go here and will happen when the button is released
         JSR InputARelease
-        ;JSR ChangePaletteBlack
 CheckB:
 
     LDA buttons 
@@ -1239,7 +1238,7 @@ CheckUp:
     ORA #$10
     STA ButtonFlag
     JSR InputUp
-    JMP EndButtons 
+    JMP CheckDown
 
     CheckUpRelease:
         LDA ButtonFlag
@@ -1258,7 +1257,7 @@ CheckDown:
     ORA #$20 
     STA ButtonFlag 
     JSR InputDown
-    JMP EndButtons
+    JMP CheckLeft
 
     CheckDownRelease:
         LDA ButtonFlag
@@ -1277,7 +1276,7 @@ CheckLeft:
     ORA #$40 
     STA ButtonFlag 
     JSR InputLeft
-    JMP EndButtons 
+    JMP CheckRight
 
     CheckLeftRelease:
         LDA ButtonFlag
@@ -1296,7 +1295,8 @@ CheckRight:
     LDA ButtonFlag 
     ORA #$80 
     STA ButtonFlag
-    JSR InputRight
+    JSR InputRight 
+    JMP EndButtons
 
     CheckRightRelease:
         LDA ButtonFlag
@@ -1320,18 +1320,18 @@ RTS
 
 InputB:
 
-RTS
+RTS 
 
-InputBRelease:
-    JSR CycleRain
+InputBRelease: 
+    JSR CycleSong
 RTS
 
 InputStart:
-    JSR DarkenBackGroundPalette
+
 RTS
 
 InputStartRelease:
-    JSR BrightenBackGroundPalette
+    JSR DarkenBackGroundPalette
 RTS
 
 InputSelect:
@@ -1368,8 +1368,6 @@ InputUpRelease:
     BNE :+
     JSR InputNoteUp
     :
-    LDA #$00 
-    JSR SoundLoad 
 RTS
 
 InputDown:
@@ -1397,8 +1395,6 @@ InputDownRelease:
     BNE :+
     JSR InputNoteDown
     :
-    LDA #$02
-    JSR SoundLoad 
 RTS
 
 InputLeft:
@@ -1429,8 +1425,6 @@ InputLeftRelease:
     BNE :+
     JSR InputNoteLeft
     :
-    LDA #$03
-    JSR SoundLoad 
 RTS
 
 InputRight:
@@ -1462,8 +1456,6 @@ InputRightRelease:
     BNE :+
     JSR InputNoteRight
     :
-    LDA #$01 
-    JSR SoundLoad 
 RTS
 ;;;;;;
 ; Entity creation
@@ -2971,6 +2963,18 @@ OAMBuffer:
 ; AUDIO ENGINE 
 ;;;;;;;;;;;;;;;;;
 
+CycleSong:
+    DEC currentsong
+    LDA currentsong
+    BPL :+ ; this technically doesnt work if you have more than 128 headers? 
+    LDA #$03 ; number of songs total -1 
+    STA currentsong 
+    JSR SoundLoad
+RTS 
+    : 
+    JSR SoundLoad
+RTS 
+
 SoundInit:
     LDA #$0F 
     STA $4015 
@@ -3004,6 +3008,7 @@ SoundDisable:
     STA sounddisableflag
 RTS 
 
+; Argument of A = song number 
 SoundLoad:
     STA soundtemp1
     ASL 
