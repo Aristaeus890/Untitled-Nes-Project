@@ -3068,6 +3068,8 @@ SoundLoad:
 
         LDA #$00 
         STA streamvolumeenvelopeindex, X 
+        STA streamnoteoffset, X 
+        STA streamloop1, X 
 
     SoundNextStream:
         INY 
