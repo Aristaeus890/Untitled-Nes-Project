@@ -654,11 +654,15 @@ STA world
 LDA #>LevelScreenDock+1
 STA world+1
 
+; Set Song 
+LDA #$01 
+JSR SoundLoad
+
 JSR ChangePaletteBlack
 ;JSR SpawnFourNotes
 JSR ChangePaletteOrange
 JSR SpawnPlayer ; Other behaviours rely on this being first in the entity array
-jSR SpawnEurydice
+JSR SpawnEurydice
 JSR SpawnCrystal
 JSR SpawnNESButtons
 LDA #$17
@@ -1379,8 +1383,6 @@ InputDown:
     CLC
     ADC #$01 
     STA entities+Entity::ypos
-    LDA #$10
-    STA entities+Entity::spriteno
 EndInputDown:    
 RTS
 
@@ -1405,8 +1407,6 @@ InputLeft:
     LDA dxhigh
     SBC #$00
     STA dxhigh
-    LDA #$00
-    STA entities+Entity::spriteno
 EndInputLeft:
 RTS
 
@@ -1431,9 +1431,6 @@ InputRight:
     LDA dxhigh
     ADC #$00
     STA dxhigh
-    LDA #$00
-    STA entities+Entity::spriteno
-    ;JSR CollideRight
 EndInputRight:
 RTS
 
@@ -2926,7 +2923,6 @@ SoundSilenceInit:
     ;STA sfxindex
     ;STA soundframecount
 RTS 
-
 SoundDisable: 
     LDA #$00 
     STA $4015 
