@@ -272,6 +272,7 @@
 
     seed: .res 2 ; gets inited to anything but 1 
     world: .res 2  ; used as a pointer to level screens
+    currententitynumber: .res 1
     tablepointer: .res 2
     buttons: .res 1 ; used for polling controller
     nmidone: .res 1 ; ppu is done when this is 1 ;
@@ -1084,7 +1085,7 @@ ClearSpriteBuffer:
     ClearBufferLoop:
         STA $0200, X
         INX 
-        CPX #$30
+        CPX #$FF
         BNE ClearBufferLoop 
     RTS
 
@@ -1476,6 +1477,7 @@ SpawnPlayer:
         TAX 
         JMP SpawnPlayerLoop
     AddPlayer:
+        INC currententitynumber
         LDA #$9F
         STA entities+Entity::xpos, X
         LDA #$9F
@@ -1505,6 +1507,7 @@ SpawnNESButtons:
         TAX 
         JMP SpawnNESButtonsLoop
     AddNESButtons:
+        INC currententitynumber
         LDA #$17
         STA entities+Entity::xpos, X
         LDA #$3B
@@ -1534,6 +1537,7 @@ SpawnCrystal:
         TAX 
         JMP CrystalLoop
     AddCrystal:
+        INC currententitynumber
         LDA #$77
         STA entities+Entity::xpos, X
         LDA #$4D 
@@ -1563,6 +1567,7 @@ SpawnEurydice:
         TAX 
         JMP EurydiceLoop
     AddEurydice:
+        INC currententitynumber
         LDA entities+Entity::xpos 
         SEC 
         SBC #$08
@@ -1611,19 +1616,20 @@ RainLoop:
     TAX
     JMP RainLoop
 
-AddRain:
-    JSR Prng
-    STA entities+Entity::xpos, X ; set the new entity position
-    LDA #$F9
-    STA entities+Entity::ypos, X
+    AddRain:
+        INC currententitynumber
+        JSR Prng
+        STA entities+Entity::xpos, X ; set the new entity position
+        LDA #$F9
+        STA entities+Entity::ypos, X
 
-    LDA #EntityType::Rain
-    STA entities+Entity::type, X
-    LDA #$4B
-    STA entities+Entity::spriteno, X
-    LDA #$02
-    STA entities+Entity::palette, X 
-    JMP EndRainSpawn 
+        LDA #EntityType::Rain
+        STA entities+Entity::type, X
+        LDA #$4B
+        STA entities+Entity::spriteno, X
+        LDA #$02
+        STA entities+Entity::palette, X 
+        JMP EndRainSpawn 
 
 EndRainSpawn:
     RTS
@@ -1644,18 +1650,19 @@ RainRightLoop:
     TAX
     JMP RainRightLoop
 
-AddRainRight:
-    JSR Prng
-    STA entities+Entity::xpos, X ; set the new entity position
-    LDA #$F9
-    STA entities+Entity::ypos, X
-    LDA #EntityType::RainRight
-    STA entities+Entity::type, X
-    LDA #$4C
-    STA entities+Entity::spriteno, X
-    LDA #$02
-    STA entities+Entity::palette, X 
-    JMP EndRainSpawn 
+    AddRainRight:
+        INC currententitynumber        
+        JSR Prng
+        STA entities+Entity::xpos, X ; set the new entity position
+        LDA #$F9
+        STA entities+Entity::ypos, X
+        LDA #EntityType::RainRight
+        STA entities+Entity::type, X
+        LDA #$4C
+        STA entities+Entity::spriteno, X
+        LDA #$02
+        STA entities+Entity::palette, X 
+        JMP EndRainSpawn 
 
 EndRainRightSpawn:
     RTS
@@ -1677,18 +1684,19 @@ RainLeftLoop:
     TAX
     JMP RainLeftLoop
 
-AddRainLeft:
-    JSR Prng
-    STA entities+Entity::xpos, X ; set the new entity position
-    LDA #$F9
-    STA entities+Entity::ypos, X
-    LDA #EntityType::RainLeft
-    STA entities+Entity::type, X
-    LDA #$4D
-    STA entities+Entity::spriteno, X
-    LDA #$02
-    STA entities+Entity::palette, X 
-    JMP EndRainSpawn 
+    AddRainLeft:
+        INC currententitynumber
+        JSR Prng
+        STA entities+Entity::xpos, X ; set the new entity position
+        LDA #$F9
+        STA entities+Entity::ypos, X
+        LDA #EntityType::RainLeft
+        STA entities+Entity::type, X
+        LDA #$4D
+        STA entities+Entity::spriteno, X
+        LDA #$02
+        STA entities+Entity::palette, X 
+        JMP EndRainSpawn 
 
 EndRainLeftSpawn:
     RTS
@@ -1715,27 +1723,28 @@ NoteLoop:
     TAX
     JMP NoteLoop
 
-AddNote:
-    LDA entities+Entity::xpos ; get player xpos
-    CLC 
-    ADC #$01 ;offset slightly the player pos
-    STA entities+Entity::xpos, X ; set the new entity position
-    LDA entities+Entity::ypos ; ditto for the y 
-    SBC #$02
-    STA entities+Entity::ypos, X
-    LDA #$02 ; note type
-    STA entities+Entity::type, X
-    LDA nextnote
-    STA entities+Entity::spriteno, X
-    JSR Prng
-    LSR 
-    LSR 
-    LSR 
-    LSR 
-    LSR 
-    LSR 
-    STA entities+Entity::palette, X
-    JMP EndNoteSpawn 
+    AddNote:
+        INC currententitynumber
+        LDA entities+Entity::xpos ; get player xpos
+        CLC 
+        ADC #$01 ;offset slightly the player pos
+        STA entities+Entity::xpos, X ; set the new entity position
+        LDA entities+Entity::ypos ; ditto for the y 
+        SBC #$02
+        STA entities+Entity::ypos, X
+        LDA #$02 ; note type
+        STA entities+Entity::type, X
+        LDA nextnote
+        STA entities+Entity::spriteno, X
+        JSR Prng
+        LSR 
+        LSR 
+        LSR 
+        LSR 
+        LSR 
+        LSR 
+        STA entities+Entity::palette, X
+        JMP EndNoteSpawn 
 
 EndNoteSpawn:
     RTS
@@ -1768,33 +1777,34 @@ SpawnFourNotes:
     TAX 
     JMP SpawnFourNotesLoop
 
-AddFourNotes:
-    CPY #$02
-    BCS AddFourNotes2
+    AddFourNotes:
+            INC currententitynumber
+        CPY #$02
+        BCS AddFourNotes2
 
-    TYA  
-    ASL 
-    ASL 
-    ASL
-    ASL
-    ASL 
-    CLC 
-    ADC temp 
-    STA entities+Entity::xpos, X 
-    LDA entities+Entity::ypos ; ditto for the y 
-    CLC 
-    ADC #$04
-    STA entities+Entity::ypos, X
-    LDA #EntityType::NoteStatic ; note type
-    STA entities+Entity::type, X
-    TYA 
-    CLC 
-    ADC nextnote
-    STA entities+Entity::spriteno, X 
-    LDA notepalette
-    STA entities+Entity::palette, X
-    INY 
-    JMP SpawnFourNotesLoop  
+        TYA  
+        ASL 
+        ASL 
+        ASL
+        ASL
+        ASL 
+        CLC 
+        ADC temp 
+        STA entities+Entity::xpos, X 
+        LDA entities+Entity::ypos ; ditto for the y 
+        CLC 
+        ADC #$04
+        STA entities+Entity::ypos, X
+        LDA #EntityType::NoteStatic ; note type
+        STA entities+Entity::type, X
+        TYA 
+        CLC 
+        ADC nextnote
+        STA entities+Entity::spriteno, X 
+        LDA notepalette
+        STA entities+Entity::palette, X
+        INY 
+        JMP SpawnFourNotesLoop  
 
 AddFourNotes2:
     LDA entities+Entity::xpos
@@ -1849,6 +1859,7 @@ FireLoop:
     JMP FireLoop
 
 AddFire:
+            INC currententitynumber
     LDA entities+Entity::xpos
     CLC 
     ADC #$10
@@ -2082,12 +2093,14 @@ ProcessEntities: ; TODO change this to a jump pointer  table
         JMP EntityComplete
 
     ClearEntity:
+        DEC currententitynumber
         LDA #EntityType::NoEntity
         STA entities+Entity::type, X
         LDA #$00
         STA entities+Entity::xpos, X
         STA entities+Entity::ypos, X
         STA entities+Entity::spriteno, X
+        STA entities+Entity::palette, X 
  
 
 
