@@ -871,7 +871,7 @@ DoGameLogic:
     JSR CheckPlayerPosition 
     JSR NoteIndex   ; This changes the note sprite that will spawn
     JSR ReadButtons ; Duh
-    JSR SpawnRain
+    ; JSR SpawnRain
     JSR XMovement ; the player movement
     JSR PlayerBoundary
     JSR ProcessEntities ; entity behaviour is handled here, the player has some special stuff elsewhere
@@ -1336,13 +1336,11 @@ InputStartRelease:
 RTS
 
 InputSelect:
-
+    JSR SpawnRain
 RTS
 
 InputSelectRelease:
-    LDA gamemode 
-    EOR #$01 
-    STA gamemode
+
 RTS
 
 InputUp:
@@ -1364,11 +1362,7 @@ EndInputUp:
 RTS
 
 InputUpRelease:
-    LDA gamemode
-    CMP #$01
-    BNE :+
-    JSR InputNoteUp
-    :
+
 RTS
 
 InputDown:
@@ -1391,11 +1385,7 @@ EndInputDown:
 RTS
 
 InputDownRelease:
-    LDA gamemode
-    CMP #$01
-    BNE :+
-    JSR InputNoteDown
-    :
+
 RTS
 
 InputLeft:
@@ -1421,11 +1411,7 @@ EndInputLeft:
 RTS
 
 InputLeftRelease:
-    LDA gamemode
-    CMP #$01
-    BNE :+
-    JSR InputNoteLeft
-    :
+
 RTS
 
 InputRight:
@@ -1452,11 +1438,7 @@ EndInputRight:
 RTS
 
 InputRightRelease:
-    LDA gamemode
-    CMP #$01
-    BNE :+
-    JSR InputNoteRight
-    :
+
 RTS
 ;;;;;;
 ; Entity creation
@@ -2472,75 +2454,6 @@ PlayerBoundary:
     EndPlayerBoundary:
 RTS 
 
-;;;;;;;;;;
-; Stuff to do with singing
-;;;;;;;;;;;;
-InputNoteUp:
-    LDA #$01
-    LDX notecount
-    STA NoteInputMem, X
-    JMP CheckNoteMem 
-InputNoteDown:
-    LDA #$02
-    LDX notecount
-    STA NoteInputMem, X
-    JMP CheckNoteMem
-InputNoteLeft:
-    LDA #$04
-    LDX notecount
-    STA NoteInputMem, X
-    JMP CheckNoteMem
-InputNoteRight:
-    LDA #$08
-    LDX notecount
-    STA NoteInputMem, X
-    JMP CheckNoteMem
-CheckNoteMem:
-    LDA notecount
-    CMP #$03
-    BEQ ProcessNoteMem
-    INC notecount
-    RTS
-ProcessNoteMem:
-    LDX #$00
-    LDA NoteInputMem, X
-    CMP #$01
-    BNE ClearNoteMem
-    INX 
-    LDA NoteInputMem, X
-    CMP #$02
-    BNE ClearNoteMem
-    INX
-    LDA NoteInputMem, X
-    CMP #$04
-    BNE ClearNoteMem
-    INX 
-    LDA NoteInputMem, X
-    CMP #$08
-    BNE ClearNoteMem
-
-NoteMemCheckComplete:
-JSR ChangePaletteBlack
-
-ClearNoteMem:
-    LDA #$00
-    STA notecount
-EndNoteMem:
-RTS
-
-SingMode:
-    LDA SingMode
-    
-    BNE :+
-    RTS
-    : 
-
-    LDA noteflag
-    
-    BNE :+
-    RTS
-    :
-RTS
 
 ;;;;
 ; Bank Switching
