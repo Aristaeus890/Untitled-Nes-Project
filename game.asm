@@ -38,6 +38,8 @@
     Splash = 16
     RainRight = 17
     RainLeft = 18
+    NoteTopBar = 19 
+    NoteSequence = 20
 .endscope
 
 .scope GameMode
@@ -266,7 +268,7 @@
 ;todo: entities currently cant be moved bc references to its abs loc in other places 
 .segment "ZEROPAGE" ; LSB 0 - FF
 ;; Reserve memory for some specific things we need not to be futzed with
-    MAXENTITIES =30 ; max allowed number of entities
+    MAXENTITIES = 10; max allowed number of entities
     entities: .res .sizeof(Entity) * MAXENTITIES 
     TOTALENTITIES = .sizeof(Entity) * MAXENTITIES
 
@@ -312,7 +314,7 @@
     DrawColumnLeftFlag: .res 1
     columnaddress: .res 2
     gamemode: .res 1
-    noteflag: .res 1
+    playerfacing: .res 1
     notecount: .res 1
     paletteaddress: .res 2
     updatebackgroundpaletteflag: .res 1
@@ -331,6 +333,39 @@
     currentbank: .res 1
     scrollinprogress: .res 1
     currentsong: .res 1
+    loopcounter: .res 1
+
+; map some memory baabbbby!
+; All sprite data is to be stored here and retrieved every frame
+; Sprite buffer takes 4x64 = 256 bytes
+SpriteBuffer = $0200 ;$0200 -> $02FF
+TileBuffer = $0300 ; $0300 -> 031F
+PaletteBufferBackground = $0320 ; 03320 ->032F
+PaletteBufferSprites =  $0330 ; -> 033f
+ApuBuffer = $0340 ; 0340 -> 034F
+streamcurrentsound = $0350 ; 0350 -> 0355
+streamstatus = $0356 ; 0356 -> 035B 
+streamchannel = $035C ; 035C -> 0361
+streampointerlow = $0362 ; 0362 -> 0367
+streampointerhigh = $0368 ; 0368 -> 036D
+streamvolduty  = $036E ; 036E -> 0373
+streamnotelow = $0374 ; 0374 -> 0379 
+streamnotehigh = $037A ; 037A -> 037F
+streamtempo = $0380 ; -> 0385
+streamtickertotal = $0386 ; -> 038B
+streamnotelengthcount = $038C ; -> 0391
+streamnotelength = $0392 ; -> 0397
+streamvolumeenvelope = $0398 ; -> 039D
+streamvolumeenvelopeindex = $039E ; -> 03A3
+streamloop1 = $03A4 ; -> 03A9
+streamnoteoffset = $03AA ; -> 03AF 
+TileBuffer2 = $03B0 ; -> 03CF
+CollisionMap = $03D0 ; -> 04BF 240 bytes
+NoteInputMem = $0400 ; dont delete this 
+CurrentBackgroundPalette = $04C0 ; -> 04CF
+CurrentSpritePalette = $03F0
+NoteSequenceMem = $07FB ; -> FF One byte to hold the number, 4 for note vals
+
 ;; This tells the nes what to do when it starts up
 ;; We basically disable most things initially and initialise some others
 
@@ -550,35 +585,6 @@ InitSeed: ; this can be literally anything as long as it isn't 0
     LDA #$01 
     STA seed 
     STA seed+1
-; map some memory baabbbby!
-; All sprite data is to be stored here and retrieved every frame
-; Sprite buffer takes 4x64 = 256 bytes
-SpriteBuffer = $0200 ;$0200 -> $02FF
-TileBuffer = $0300 ; $0300 -> 031F
-PaletteBufferBackground = $0320 ; 03320 ->032F
-PaletteBufferSprites =  $0330 ; -> 033f
-ApuBuffer = $0340 ; 0340 -> 034F
-streamcurrentsound = $0350 ; 0350 -> 0355
-streamstatus = $0356 ; 0356 -> 035B 
-streamchannel = $035C ; 035C -> 0361
-streampointerlow = $0362 ; 0362 -> 0367
-streampointerhigh = $0368 ; 0368 -> 036D
-streamvolduty  = $036E ; 036E -> 0373
-streamnotelow = $0374 ; 0374 -> 0379 
-streamnotehigh = $037A ; 037A -> 037F
-streamtempo = $0380 ; -> 0385
-streamtickertotal = $0386 ; -> 038B
-streamnotelengthcount = $038C ; -> 0391
-streamnotelength = $0392 ; -> 0397
-streamvolumeenvelope = $0398 ; -> 039D
-streamvolumeenvelopeindex = $039E ; -> 03A3
-streamloop1 = $03A4 ; -> 03A9
-streamnoteoffset = $03AA ; -> 03AF 
-TileBuffer2 = $03B0 ; -> 03CF
-CollisionMap = $03D0 ; -> 04BF 240 bytes
-NoteInputMem = $0400 ; dont delete this 
-CurrentBackgroundPalette = $04C0 ; -> 04CF
-CurrentSpritePalette = $03F0
 
 FillTileBuffer:
 LDA #$22
@@ -659,9 +665,13 @@ LDA #$01
 JSR SoundLoad
 
 JSR ChangePaletteBlack
-;JSR SpawnFourNotes
 JSR ChangePaletteOrange
 JSR SpawnPlayer ; Other behaviours rely on this being first in the entity array
+
+; LDA #$03 
+; STA loopcounter
+; JSR SpawnNoteTopBar
+
 JSR SpawnEurydice
 JSR SpawnCrystal
 JSR SpawnNESButtons
@@ -1045,6 +1055,9 @@ CheckPlayerPosition:
         LDA #$20
         STA entities+Entity::xpos
 
+        LDA #$00
+        STA columnnumber
+
         LDA #$01 
         STA scrollinprogress
         STA ScrollRightInProgress
@@ -1328,7 +1341,7 @@ InputB:
 RTS 
 
 InputBRelease: 
-    JSR CycleSong
+   ; JSR CycleSong
 RTS
 
 InputStart:
@@ -1336,7 +1349,8 @@ InputStart:
 RTS
 
 InputStartRelease:
-    JSR DarkenBackGroundPalette
+    ; JSR DarkenBackGroundPalette
+    JSR CycleRain
 RTS
 
 InputSelect:
@@ -1344,7 +1358,7 @@ InputSelect:
 RTS
 
 InputSelectRelease:
-
+    JSR CycleGameMode  
 RTS
 
 InputUp:
@@ -1362,11 +1376,18 @@ InputUp:
         STA entities+Entity::ypos
         LDA #$18
         STA entities+Entity::spriteno
+    LDA #$00
+    STA playerfacing
 EndInputUp:
 RTS
 
 InputUpRelease:
-
+    LDA gamemode 
+    CMP #$01 
+    BNE EndInputUpRelease
+    LDA #$01 
+    JSR AddNoteToBuffer
+    EndInputUpRelease:
 RTS
 
 InputDown:
@@ -1383,11 +1404,18 @@ InputDown:
     CLC
     ADC #$01 
     STA entities+Entity::ypos
+    LDA #$01 
+    STA playerfacing
 EndInputDown:    
 RTS
 
 InputDownRelease:
-
+    LDA gamemode 
+    CMP #$01 
+    BNE EndInputDownRelease
+    LDA #$02 
+    JSR AddNoteToBuffer
+    EndInputDownRelease:
 RTS
 
 InputLeft:
@@ -1407,10 +1435,18 @@ InputLeft:
     LDA dxhigh
     SBC #$00
     STA dxhigh
+    LDA #$02 
+    STA playerfacing
 EndInputLeft:
 RTS
 
 InputLeftRelease:
+    LDA gamemode 
+    CMP #$01 
+    BNE EndInputLeftRelease
+    LDA #$04 
+    JSR AddNoteToBuffer
+    EndInputLeftRelease:
 
 RTS
 
@@ -1431,15 +1467,127 @@ InputRight:
     LDA dxhigh
     ADC #$00
     STA dxhigh
+    LDA #$03 
+    STA playerfacing
 EndInputRight:
 RTS
 
 InputRightRelease:
+    LDA gamemode 
+    CMP #$01 
+    BNE EndInputRightRelease
+    LDA #$08 
+    JSR AddNoteToBuffer
+    EndInputRightRelease:
 
+RTS 
+  
+;;;;; note buffer 
+ 
+ AddNoteToBuffer: ; takes the note type you want to write as an argument in a 
+    INC NoteSequenceMem
+    LDX NoteSequenceMem
+
+    STA NoteSequenceMem, X
+    CPX #$04 
+    BNE EndAddNoteToBuffer
+
+    JSR CheckSequence 
+
+    EndAddNoteToBuffer: 
 RTS
+
+CheckSequence: 
+    LDX #$01
+    CheckSequenceLoop: 
+    LDA NoteSequenceMem, X 
+    CMP Sequence, X 
+    BNE EndCheckSequence
+    CPX #$04 
+    BEQ SequenceSuccess
+    INX 
+    JMP CheckSequenceLoop
+    SequenceSuccess:
+        JSR SpawnNote
+        JSR CycleGameMode
+
+
+EndCheckSequence:
+RTS 
+
+Sequence:
+    .byte $00,$01,$02,$04,$08
+
+
+
 ;;;;;;
 ; Entity creation
 ;;;;;;
+
+SpawnNoteSequence:
+    LDX #$00 
+    SpawnNoteSequenceLoop:
+        CPX #TOTALENTITIES
+        BEQ EndSpawnNoteSequence
+
+        LDA entities+Entity::type, X
+        CMP #EntityType::NoEntity
+        BEQ AddNoteSequence 
+        TXA 
+        CLC 
+        ADC #.sizeof(Entity)
+        TAX 
+        JMP SpawnNoteSequenceLoop
+    AddNoteSequence:
+    INC currententitynumber
+    LDA #$10
+    STA entities+Entity::xpos, X
+    LDA #$10 
+    STA entities+Entity::ypos, X
+    LDA #EntityType::NoteSequence
+    STA entities+Entity::type, X
+    LDA #$20
+    STA entities+Entity::spriteno, X
+    LDA #%00100001
+    STA entities+Entity::palette, X
+    JMP EndSpawnNoteSequence
+EndSpawnNoteSequence:
+RTS
+
+SpawnNoteTopBar: 
+    LDX #$00 
+    SpawnNoteTopBarLoop: 
+        CPX #TOTALENTITIES
+        BEQ EndNoteTopBarSpawn
+
+        LDA entities+Entity::type, X 
+        CMP #EntityType::NoEntity
+        BEQ AddNoteTopBar
+        TXA 
+        CLC
+        ADC #.sizeof(Entity)
+        TAX 
+        JMP SpawnNoteTopBarLoop
+    AddNoteTopBar: 
+        INC currententitynumber
+        LDY loopcounter
+        LDA NoteTopBarX, Y 
+        STA entities+Entity::xpos, X
+        LDA #$20
+        STA entities+Entity::ypos, X
+        LDA #EntityType::NoteTopBar
+        STA entities+Entity::type, X
+        LDA #$4E
+        STA entities+Entity::spriteno, X
+        LDA #%00000000
+        STA entities+Entity::palette, X
+
+        LDA loopcounter ; set how many times you want it to loop before you call 
+        BEQ EndNoteTopBarSpawn
+        DEC loopcounter
+        JMP SpawnNoteTopBar
+EndNoteTopBarSpawn:
+RTS
 
 SpawnPlayer:
     LDX #$00
@@ -2101,6 +2249,7 @@ ProcessEntities: ; TODO change this to a jump pointer  table
     NOP
 RTS
 
+
 ; this attaches to an object and checks if that object is colliding with the player
 PlayerCollide:
     LDA entities+Entity::xpos
@@ -2346,6 +2495,34 @@ RTS
     LDA #$00
     STA return
 RTS  
+
+;;;;;;;
+;Game mode functions 
+;;;;;;
+
+; Cycle gamemode between play and song input 
+CycleGameMode: 
+    LDA gamemode
+    BEQ CycleGameModeToSing
+    CycleGameModeToPlay: 
+    EOR #$01
+    STA gamemode
+    CycleGameModeToSing:
+    ORA #$01 
+    STA gamemode 
+    JSR DarkenBackGroundPalette
+
+    LDX #$04
+    LDA #$00   
+    ClearNoteMemLoop: ; 
+        STA NoteSequenceMem, X 
+        DEX  
+        CPX #$00 
+        BNE ClearNoteMemLoop
+  
+EndCycleGameMode:
+RTS 
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;; movement mechanics
@@ -3371,7 +3548,9 @@ WriteToTileBuffer:
 
     CheckScrollDirection:
         LDA ScrollLeftInProgress
-        BNE WriteColumnToBufferLeft
+        BEQ :+
+        JMP WriteColumnToBufferLeft
+        :
         LDA ScrollRightInProgress
         BNE WriteColumnToBuffer
     RTS 
@@ -3388,7 +3567,10 @@ WriteToTileBuffer:
         LDA columnnumber
         SEC 
         SBC #$01
-        ;lsr
+        BPL :+ 
+        LDA #$00
+        STA columnnumber
+        :
         CLC 
         ADC columnaddress
         STA columnaddress 
@@ -3444,7 +3626,6 @@ WriteToTileBuffer:
         BNE :+
         LDA #$00 
         STA scrollinprogress
-        STA columnnumber
         STA ScrollRightInProgress
         STA ScrollX
         JSR WriteToCollisionMap
@@ -3569,7 +3750,8 @@ AttributeData:
 SoundData: 
     .byte $00, $01, $03, $04, $05, $06, $07, $08, $09, $0A, $0B, $0C, $0D, $0E, $0F 
 
-;Todo: Compression of worldata
+NoteTopBarX: 
+    .byte $60, $68, $70, $78, $80
 
 WorldMap: ; read into this index to get screendata and when not to scroll further
     .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF 
@@ -3964,6 +4146,7 @@ DrawSpriteList:
     .word DrawSingleSprite ; splash
     .word DrawSingleSprite ; rain right 
     .word DrawSingleSprite ; rain  left
+    .word DrawSingleSprite ; top bar note
 
 CycleRain:
     DEC environmentflags
@@ -4060,6 +4243,12 @@ MetaTileList:
 .word WeaponRack
 .word LightPost
 .word BrickLight
+.word BridgeWater
+.word Test2
+.word Test3
+.word Test4
+.word Test5
+.word Test6
 ; 4x4 tile definitions
 Blank0:
     .byte $24, $24 ; pattern tabl
@@ -4427,15 +4616,37 @@ BrickLight:
     .byte $A3, $A4 
     .byte $A5, $A6 
 
+BridgeWater: 
+    .byte $D6, $D6 
+    .byte $D7, $D8
+
+Test2: 
+    .byte $24, $24 
+    .byte $24, $24
+
+Test3: 
+    .byte $24, $24 
+    .byte $24, $24
+
+Test4: 
+    .byte $24, $24 
+    .byte $24, $24
+
+Test5: 
+    .byte $24, $24 
+    .byte $24, $24
 
 
+Test6: 
+    .byte $24, $24 
+    .byte $24, $24
 CollisionList:
     .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$02,$02,$02 ;00 -> 0F
     .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ;10 -> 1F
     .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ;20 -> 2F
     .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ;30 -> 3F
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ;30 -> 3F
-    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ;30 -> 3F
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ;30 -> 4F
+    .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ;30 -> 5F
     .byte $00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00 ;30 -> 3F
 
 ScreenList:
@@ -4515,8 +4726,8 @@ LevelScreenBridge:
 .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
 .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
 .byte $00, $4C, $00, $4C, $00, $4C, $4B, $4B, $00, $00, $4C, $00, $4C, $00, $4C, $00
-.byte $45, $45, $45, $45, $45, $45, $32, $38, $39, $32, $45, $45, $45, $45, $45, $45
-.byte $49, $49, $48, $48, $48, $48, $32, $38, $39, $32, $48, $48, $48, $48, $48, $48
+.byte $46, $46, $46, $46, $46, $46, $32, $38, $39, $32, $46, $46, $46, $46, $46, $46
+.byte $4E, $4E, $4E, $4E, $4E, $4E, $4E, $4E, $4E, $4E, $4E, $4E, $4E, $4E, $4E, $4E
 .byte $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B, $2D, $2F, $2B
 .byte $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C, $2E, $30, $2C
 
@@ -4538,3 +4749,15 @@ AttributesBridge:
     .incbin "Bank1.chr"
     .incbin "Bank2.chr"
 
+;;;;;;;;;
+; Song IDEAS!!!
+;;;;;;;;;
+
+
+; Move object - not very interesting
+; Freeze/Unfreeze - unfreeze people as you move through areas? Bring back some life to the underworld!!
+; Make Rain/Make Sun? Potentially fill pits etc
+; Raise/Lower 
+; Shatter - very note, shatters glass etc 
+; Sleep/Wake - lullaby vs very loud notes. Wake up Charon so you can cross the river?
+; Guide - possibly give hints, or maybe something to guide you in dark/labyrinths?   
